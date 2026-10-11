@@ -6,6 +6,24 @@ Teal Brick opt2: Knowledge miniapp, built on the Miniapp SDK.
 
 Owner lane: Lead · Knowledge.
 
+## What it is
+
+Knowledge gives agents memory and documents, with data in the customer's own deployment.
+
+- Canonical documents (collections, revisions, comments, links, attachments) live in Knowledge, engine-independent.
+- Document bodies are projected into the memory engine. Engines are pinned, unmodified upstream services: GBrain (memory), Open Notebook (research); Hindsight later.
+- Areas are grant scopes: one memory garden per agent and one shared company area.
+- Auth, grants, receipts, settings and backups come from the Miniapp SDK. Knowledge has no own auth.
+
+## Layout
+
+- `src/engines/` engine adapters (one interface, one adapter per upstream engine)
+- `src/store/` canonical document store (SQLite)
+- `skills/` manifest-declared skills (how to work with the memory system, per engine)
+- `test/` unit tests (`npm test`); `npm run typecheck`
+
+Status: scaffold. Built against the frozen opt2 specs in phase P1.
+
 ## No secrets policy
 
 This repository is public. It must never contain secrets or personal data:
