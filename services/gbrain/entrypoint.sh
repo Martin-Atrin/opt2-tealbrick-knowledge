@@ -23,5 +23,8 @@ if [ ! -f "$GBRAIN_HOME/.gbrain/config.json" ]; then
 fi
 gbrain apply-migrations --yes --no-autopilot-install
 
+# Private-network shape from upstream docs/mcp/DEPLOY.md ("Plain HTTP"): no --public-url, so the OAuth issuer stays
+# the default http://localhost:<port> (the MCP SDK refuses a non-HTTPS issuer on any other host). Knowledge's
+# client_credentials tokens are bound to that default resource and verified without reading the request host.
 exec bun run "$GBRAIN_ROOT/src/cli.ts" serve --http --bind "${GBRAIN_BIND:-::}" --port "${PORT:-3131}" \
-  --public-url "http://${RAILWAY_PRIVATE_DOMAIN:-localhost}:${PORT:-3131}" --suppress-bootstrap-token --fail-fast
+  --suppress-bootstrap-token --fail-fast
