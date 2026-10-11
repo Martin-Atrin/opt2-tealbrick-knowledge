@@ -8,6 +8,8 @@ ARG TB_SDK_URL
 RUN npm install --prefix /opt/tb --omit=dev --no-audit --no-fund "$TB_SDK_URL" && npm cache clean --force \
   && apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=surreal /surreal /surreal
+COPY notebook-db-dump notebook-db-restore /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/notebook-db-dump /usr/local/bin/notebook-db-restore
 RUN mkdir -p /mydata
 ENTRYPOINT ["node", "/opt/tb/node_modules/@opt2-tealbrick/miniapp-sdk/dist/server/tb-exec-cli.js", "--"]
 CMD ["sh", "-c", "exec /surreal start --bind 0.0.0.0:8000 --user \"$SURREAL_USER\" --pass \"$SURREAL_PASS\" rocksdb:/mydata/knowledge.db"]

@@ -1,0 +1,4 @@
+#!/bin/sh
+# SDK backup part: SurrealQL export of the Open Notebook database to stdout.
+set -eu
+exec /surreal export --endpoint "http://127.0.0.1:8000" --username "$SURREAL_USER" --password "$SURREAL_PASS" --namespace knowledge --database knowledge -

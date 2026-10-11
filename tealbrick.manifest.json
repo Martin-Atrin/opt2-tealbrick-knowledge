@@ -253,26 +253,10 @@
         "startOrder": 0,
         "backup": {
           "dump": [
-            "/surreal",
-            "export",
-            "--endpoint",
-            "http://localhost:8000",
-            "--namespace",
-            "knowledge",
-            "--database",
-            "knowledge",
-            "/dev/stdout"
+            "/usr/local/bin/notebook-db-dump"
           ],
           "restore": [
-            "/surreal",
-            "import",
-            "--endpoint",
-            "http://localhost:8000",
-            "--namespace",
-            "knowledge",
-            "--database",
-            "knowledge",
-            "/dev/stdin"
+            "/usr/local/bin/notebook-db-restore"
           ],
           "extension": "surql"
         }
