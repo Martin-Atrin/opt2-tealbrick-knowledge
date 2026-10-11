@@ -1,6 +1,6 @@
 # Open Notebook research engine (upstream unmodified) + tb-exec wrapper.
 # Build context: repository root.
-ARG TB_SDK_URL=https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.1/opt2-tealbrick-miniapp-sdk-0.1.1.tgz
+ARG TB_SDK_URL=https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.4/opt2-tealbrick-miniapp-sdk-0.1.4.tgz
 FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS tb
 ARG TB_SDK_URL
 RUN npm install --prefix /opt/tb --omit=dev --no-audit --no-fund "$TB_SDK_URL" && npm cache clean --force
