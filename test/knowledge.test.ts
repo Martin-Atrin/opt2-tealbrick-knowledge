@@ -160,3 +160,14 @@ test("delete removes the memory from the engine", async () => {
   const out = await run("recall", { query: "lemons" }, ctx(ADA));
   assert.equal(out.results.length, 0);
 });
+
+test("after a restore every live document is re-projected (engine state may differ from app.db)", async () => {
+  const { ctx, run, knowledge, db } = await setup();
+  await run("remember", { text: "restore check about plums" }, ctx(ADA));
+  await knowledge.current()?.projector?.drain();
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM kn_projection WHERE state = 'pending'").get()?.n, 0);
+  assert.ok((knowledge.current()?.projector?.requeueAll() ?? 0) >= 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM kn_projection WHERE state = 'pending' AND content_hash IS NULL").get()?.n, 1);
+  await knowledge.current()?.projector?.drain();
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM kn_projection WHERE state = 'ready'").get()?.n, 1);
+});

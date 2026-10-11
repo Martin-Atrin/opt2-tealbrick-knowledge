@@ -25,23 +25,31 @@ export interface Services {
   config: KnowledgeConfig;
 }
 
-class DbClientStore implements ClientStore {
-  private readonly db: Db;
-  constructor(db: Db) {
-    this.db = db;
+/** SDK app secrets (C31): sealed under TB_KEK, excluded from export. */
+export interface AppSecrets {
+  put(name: string, value: string): Promise<void>;
+  get(name: string): Promise<string | null>;
+  delete(name: string): Promise<void>;
+}
+
+/** GBrain OAuth client credentials kept as app secrets (a restore into another deployment simply re-registers). */
+class SecretClientStore implements ClientStore {
+  private readonly secrets: AppSecrets;
+  constructor(secrets: AppSecrets) {
+    this.secrets = secrets;
   }
-  get(key: string): StoredClient | null {
-    const row = this.db.prepare("SELECT * FROM kn_gbrain_clients WHERE key = ?").get(key);
-    if (!row) return null;
-    return { clientId: String(row.client_id), clientSecret: String(row.client_secret), sourceId: String(row.source_id), principal: row.principal === null ? null : String(row.principal) };
+  private name(key: string) {
+    return `gbrain-client:${key}`;
   }
-  set(key: string, client: StoredClient): void {
-    this.db
-      .prepare("INSERT INTO kn_gbrain_clients (key, client_id, client_secret, source_id, principal) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET client_id = excluded.client_id, client_secret = excluded.client_secret, source_id = excluded.source_id, principal = excluded.principal")
-      .run(key, client.clientId, client.clientSecret, client.sourceId, client.principal);
+  async get(key: string): Promise<StoredClient | null> {
+    const raw = await this.secrets.get(this.name(key));
+    return raw ? (JSON.parse(raw) as StoredClient) : null;
   }
-  delete(key: string): void {
-    this.db.prepare("DELETE FROM kn_gbrain_clients WHERE key = ?").run(key);
+  async set(key: string, client: StoredClient): Promise<void> {
+    await this.secrets.put(this.name(key), JSON.stringify(client));
+  }
+  async delete(key: string): Promise<void> {
+    await this.secrets.delete(this.name(key));
   }
 }
 
@@ -58,6 +66,7 @@ export class Knowledge {
   private services: Services | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private provisioning: Promise<void> | null = null;
+  private secrets: AppSecrets = memorySecrets();
 
   constructor(config: KnowledgeConfig, opts: KnowledgeOptions = {}) {
     this.config = config;
@@ -65,14 +74,20 @@ export class Knowledge {
   }
 
   /** Services over the SDK database (the same handle for the whole process). */
-  bind(db: Db): Services {
+  /** `secrets` is the SDK app-secret store (every SDK context carries the same one). */
+  bind(db: Db, secrets?: AppSecrets): Services {
+    if (secrets && secrets !== this.secrets) {
+      // First context that carries the SDK secret store: rebuild so engine clients use it.
+      this.secrets = secrets;
+      this.services = null;
+    }
     if (this.services && this.services.db === db) return this.services;
     const now = this.opts.now ?? Date.now;
     const store = new DocumentStore(db, now);
     const areas = new Areas(db, now);
     let engine: GBrainEngine | null = null;
     if (this.config.engine === "gbrain" && this.config.gbrainUrl && this.config.gbrainAdminToken) {
-      const client = new GBrainClient({ baseUrl: this.config.gbrainUrl, adminToken: this.config.gbrainAdminToken, store: new DbClientStore(db), fetch: this.opts.fetch, now });
+      const client = new GBrainClient({ baseUrl: this.config.gbrainUrl, adminToken: this.config.gbrainAdminToken, store: new SecretClientStore(this.secrets), fetch: this.opts.fetch, now });
       engine = new GBrainEngine(client, areaSourceId(SHARED_AREA_ID));
     }
     const notebook =
@@ -83,7 +98,7 @@ export class Knowledge {
     this.services = { db, store, areas, engine, notebook, projector, config: this.config };
     const interval = this.opts.drainIntervalMs ?? 30_000;
     if (projector && interval > 0 && !this.timer) {
-      this.timer = setInterval(() => void projector.drain().catch(() => undefined), interval);
+      this.timer = setInterval(() => void this.services?.projector?.drain().catch(() => undefined), interval);
       this.timer.unref();
     }
     return this.services;
@@ -153,4 +168,14 @@ export class Knowledge {
   forgetResearchModel(services: Services) {
     services.db.prepare("DELETE FROM kn_state WHERE key = 'notebook_model'").run();
   }
+}
+
+/** Fallback before the SDK hands over its secret store (only reached in tests). */
+export function memorySecrets(): AppSecrets {
+  const values = new Map<string, string>();
+  return {
+    put: async (name, value) => void values.set(name, value),
+    get: async (name) => values.get(name) ?? null,
+    delete: async (name) => void values.delete(name),
+  };
 }

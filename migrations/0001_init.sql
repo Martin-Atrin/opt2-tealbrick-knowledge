@@ -114,14 +114,6 @@ CREATE TABLE kn_projection (
 );
 CREATE INDEX kn_projection_due ON kn_projection(state, next_attempt_at);
 
--- Engine OAuth clients registered through the GBrain admin API (private network only).
-CREATE TABLE kn_gbrain_clients (
-  key           TEXT PRIMARY KEY,
-  client_id     TEXT NOT NULL,
-  client_secret TEXT NOT NULL,
-  source_id     TEXT NOT NULL,
-  principal     TEXT
-);
 
 -- Small app state (e.g. the research chat model id provisioned in Open Notebook).
 CREATE TABLE kn_state (

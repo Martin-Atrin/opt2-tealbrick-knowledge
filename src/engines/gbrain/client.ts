@@ -16,11 +16,11 @@ export interface StoredClient {
   principal: string | null;
 }
 
-/** Where registered client credentials live (the app DB). */
+/** Where registered client credentials live (SDK app secrets: sealed, never exported). */
 export interface ClientStore {
-  get(key: string): StoredClient | null;
-  set(key: string, client: StoredClient): void;
-  delete(key: string): void;
+  get(key: string): Promise<StoredClient | null>;
+  set(key: string, client: StoredClient): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 export class GBrainServiceError extends Error {
@@ -119,10 +119,10 @@ export class GBrainClient {
   }
 
   private async client(key: string, sourceId: string, principal: string | null): Promise<StoredClient> {
-    const existing = this.store.get(key);
+    const existing = await this.store.get(key);
     if (existing && existing.sourceId === sourceId && existing.principal === principal) return existing;
     const registered = await this.register(sourceId, principal);
-    this.store.set(key, registered);
+    await this.store.set(key, registered);
     return registered;
   }
 
@@ -157,7 +157,7 @@ export class GBrainClient {
       let stored = await this.client(key, sourceId, principal);
       let minted = await this.mint(stored);
       if (!minted) {
-        this.store.delete(key);
+        await this.store.delete(key);
         stored = await this.client(key, sourceId, principal);
         minted = await this.mint(stored);
         if (!minted) throw new GBrainServiceError("gbrain_token_unavailable");

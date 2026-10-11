@@ -1,0 +1,12 @@
+body { margin: 0; background: var(--tb-bg, #fff); color: var(--tb-ink, #111); font-family: var(--tb-font, system-ui, sans-serif); }
+.kn-shell { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+.kn-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.kn-head h1 { font-size: 20px; margin: 0; }
+.kn-head .kn-spacer { flex: 1; }
+.kn-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.kn-table th, .kn-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--tb-line, #ddd); vertical-align: middle; }
+.kn-table th { font-weight: 600; }
+.kn-muted { color: var(--tb-ink-muted, #666); font-size: 13px; }
+.kn-section { margin-top: 20px; }
+.kn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 640px) { .kn-table { font-size: 13px; } .kn-table th, .kn-table td { padding: 6px; } }

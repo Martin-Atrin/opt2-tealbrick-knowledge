@@ -10,7 +10,7 @@ import { EngineCallError, engineError, type RecallRow } from "./engines/gbrain/e
 import { resolveEntry as engineResolve } from "./engines/gbrain/exposure.ts";
 import { NotebookError } from "./engines/notebook/client.ts";
 import { agentAreaId } from "./ids.ts";
-import type { Knowledge, Services } from "./knowledge.ts";
+import type { AppSecrets, Knowledge, Services } from "./knowledge.ts";
 import { fanOut, mergeRanked } from "./merge.ts";
 import { StoreError } from "./store/documents.ts";
 
@@ -45,7 +45,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
       throw error;
     });
 
-  const services = (ctx: OpContext) => knowledge.bind(ctx.db);
+  const secretsOf = (ctx: object) => (ctx as { secrets?: AppSecrets }).secrets;
+  const services = (ctx: OpContext) => knowledge.bind(ctx.db, secretsOf(ctx));
 
   async function readable(ctx: OpContext, area: string): Promise<void> {
     if (!(await ctx.scope.can(AREA_SCOPE, area, "read"))) throw notFound();
@@ -458,7 +459,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
 
   const engineDynamic: DynamicHandlers = {
     async catalog(_query, ctx: HookContext): Promise<DynamicCatalogEntry[]> {
-      const s = knowledge.bind(ctx.db);
+      const s = knowledge.bind(ctx.db, secretsOf(ctx));
       if (!s.engine) return [];
       try {
         return await s.engine.catalog();

@@ -113,7 +113,7 @@
         "id": "gbrain-db",
         "title": "Memory database (Postgres + pgvector)",
         "build": {
-          "context": "services/gbrain-db",
+          "context": ".",
           "dockerfile": "services/gbrain-db/Dockerfile"
         },
         "port": 5432,
@@ -164,7 +164,7 @@
         "id": "gbrain",
         "title": "Memory engine (GBrain)",
         "build": {
-          "context": "services/gbrain",
+          "context": ".",
           "dockerfile": "services/gbrain/Dockerfile"
         },
         "port": 3131,
@@ -217,7 +217,7 @@
         "id": "notebook-db",
         "title": "Research database (SurrealDB)",
         "build": {
-          "context": "services/notebook-db",
+          "context": ".",
           "dockerfile": "services/notebook-db/Dockerfile"
         },
         "port": 8000,
@@ -265,7 +265,7 @@
         "id": "notebook",
         "title": "Research engine (Open Notebook)",
         "build": {
-          "context": "services/notebook",
+          "context": ".",
           "dockerfile": "services/notebook/Dockerfile"
         },
         "port": 5055,

@@ -84,6 +84,18 @@ export class Projector {
       .run(next, next >= MAX_ATTEMPTS ? "failed" : "pending", this.now() + backoffMs(next), error, areaId, documentId);
   }
 
+  /** After a restore the engine may hold an older or newer state: re-project every live document and re-delete tombstones. */
+  requeueAll(): number {
+    const live = this.db
+      .prepare(
+        `INSERT INTO kn_projection (area_id, document_id, action, content_hash, state, attempts, next_attempt_at, last_error, updated_at)
+         SELECT area_id, id, CASE WHEN deleted_at IS NULL THEN 'upsert' ELSE 'delete' END, NULL, 'pending', 0, 0, NULL, ? FROM kn_documents WHERE true
+         ON CONFLICT (area_id, document_id) DO UPDATE SET action = excluded.action, content_hash = NULL, state = 'pending', attempts = 0, next_attempt_at = 0, last_error = NULL, updated_at = max(excluded.updated_at, kn_projection.updated_at + 1)`,
+      )
+      .run(this.now());
+    return live.changes;
+  }
+
   /** Re-queue failed rows (operator action after an engine outage) — keeps their content. */
   retryFailed(): number {
     return this.db.prepare("UPDATE kn_projection SET state = 'pending', attempts = 0, next_attempt_at = 0 WHERE state = 'failed'").run().changes;

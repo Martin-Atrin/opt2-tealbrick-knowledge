@@ -1,15 +1,18 @@
 # SurrealDB for Open Notebook: the unmodified upstream binary on node:24-slim (the upstream image is
-# distroless, so tb-exec could not run there).
-ARG TB_SDK_URL=https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.0/opt2-tealbrick-miniapp-sdk-0.1.0.tgz
+# distroless, so tb-exec could not run there). Build context: repository root.
+ARG TB_SDK_URL=https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.1/opt2-tealbrick-miniapp-sdk-0.1.1.tgz
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS tb
+ARG TB_SDK_URL
+RUN npm install --prefix /opt/tb --omit=dev --no-audit --no-fund "$TB_SDK_URL" && npm cache clean --force
+# tb-exec reads the app manifest (claim digest, helper, backup) from its default path.
+COPY tealbrick.manifest.json /opt/tb/tealbrick.manifest.json
+
 FROM surrealdb/surrealdb:v2.6.5@sha256:7db835aab6355b66e2b5779a3cddae811f201c417adadb4413310ae7f925110e AS surreal
 
 FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
-ARG TB_SDK_URL
-RUN npm install --prefix /opt/tb --omit=dev --no-audit --no-fund "$TB_SDK_URL" && npm cache clean --force \
-  && apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=tb /opt/tb /opt/tb
 COPY --from=surreal /surreal /surreal
-COPY notebook-db-dump notebook-db-restore /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/notebook-db-dump /usr/local/bin/notebook-db-restore
-RUN mkdir -p /mydata
-ENTRYPOINT ["node", "/opt/tb/node_modules/@opt2-tealbrick/miniapp-sdk/dist/server/tb-exec-cli.js", "--"]
+COPY services/notebook-db/notebook-db-dump services/notebook-db/notebook-db-restore /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/notebook-db-dump /usr/local/bin/notebook-db-restore && mkdir -p /mydata
+ENTRYPOINT ["node", "/opt/tb/node_modules/@opt2-tealbrick/miniapp-sdk/dist/exec/cli.js", "--"]
 CMD ["sh", "-c", "exec /surreal start --bind 0.0.0.0:8000 --user \"$SURREAL_USER\" --pass \"$SURREAL_PASS\" rocksdb:/mydata/knowledge.db"]

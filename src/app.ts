@@ -5,7 +5,7 @@ import type { Manifest } from "@opt2-tealbrick/spec/manifest";
 import type { AppDefinition, Db, Json, Logger, ScopeStore } from "@opt2-tealbrick/spec/sdk";
 import { readConfig } from "./config.ts";
 import { createHandlers, type ErrorFactory } from "./handlers.ts";
-import { Knowledge, type KnowledgeOptions } from "./knowledge.ts";
+import { type AppSecrets, Knowledge, type KnowledgeOptions } from "./knowledge.ts";
 
 export const manifest = JSON.parse(readFileSync(new URL("../tealbrick.manifest.json", import.meta.url), "utf8")) as Manifest;
 export const migrationsDir = new URL("../migrations", import.meta.url).pathname;
@@ -13,6 +13,7 @@ export const migrationsDir = new URL("../migrations", import.meta.url).pathname;
 /** SDK C33 start context (structural; the SDK's StartContext also carries `secrets`). */
 export interface StartContext {
   db: Db;
+  secrets: AppSecrets;
   log: Logger;
   scopes: ScopeStore;
   getKey(name: string): Promise<string | null>;
@@ -32,9 +33,18 @@ export function knowledgeDefinition(env: Record<string, string | undefined>, TbE
       dynamic,
       events,
       migrations: migrationsDir,
+      // The SDK backs up app.db and each deployed service (manifest `backups` + `services[].backup`).
+      backup: {
+        async afterRestore() {
+          const services = knowledge.current();
+          const requeued = services?.projector?.requeueAll() ?? 0;
+          if (services) knowledge.kick(services);
+          void requeued;
+        },
+      },
       // After boot (and the claim): the company area exists, engine resources are provisioned, the outbox drains.
       async onStart(ctx) {
-        const services = knowledge.bind(ctx.db);
+        const services = knowledge.bind(ctx.db, ctx.secrets);
         await services.areas.ensureShared(ctx.scopes);
         await knowledge.provision(services, ctx as never);
         knowledge.kick(services);
