@@ -133,7 +133,7 @@ test("engine tools: catalog filters policy exclusions and source_id; calls are a
   assert.equal(await dynamic.resolve("gb_sources_list", hookCtx), null);
 
   gbrain.calls.length = 0;
-  await dynamic.call("gb_remember", { fact: "Ada likes tea" }, ctx(ADA, { idempotencyKey: "key-12345678" }));
+  await dynamic.call("gb_remember", { fact: "Ada likes tea" }, ctx(ADA, { idempotencyKey: "idem-".padEnd(12, "0") }));
   const call = gbrain.calls.find((c) => c.name === "remember");
   assert.ok(call && typeof call.args.request_id === "string");
   assert.equal(call.args.area, undefined);
