@@ -5,6 +5,39 @@
     "."
   ],
   "images": [
-    { "name": "opt2-tealbrick-knowledge", "product": "knowledge", "productKind": "miniapp", "manifest": "tealbrick.manifest.json" }
+    {
+      "name": "opt2-tealbrick-knowledge",
+      "product": "knowledge",
+      "productKind": "miniapp",
+      "manifest": "tealbrick.manifest.json"
+    },
+    {
+      "name": "opt2-tealbrick-knowledge-gbrain",
+      "context": ".",
+      "dockerfile": "services/gbrain/Dockerfile",
+      "product": "knowledge",
+      "productKind": "service"
+    },
+    {
+      "name": "opt2-tealbrick-knowledge-gbrain-db",
+      "context": ".",
+      "dockerfile": "services/gbrain-db/Dockerfile",
+      "product": "knowledge",
+      "productKind": "service"
+    },
+    {
+      "name": "opt2-tealbrick-knowledge-notebook",
+      "context": ".",
+      "dockerfile": "services/notebook/Dockerfile",
+      "product": "knowledge",
+      "productKind": "service"
+    },
+    {
+      "name": "opt2-tealbrick-knowledge-notebook-db",
+      "context": ".",
+      "dockerfile": "services/notebook-db/Dockerfile",
+      "product": "knowledge",
+      "productKind": "service"
+    }
   ]
 }
