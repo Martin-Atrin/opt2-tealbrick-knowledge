@@ -1,6 +1,6 @@
 {
-  "name": "@opt2-tealbrick/knowledge",
-  "version": "0.0.0",
+  "name": "opt2-tealbrick-knowledge",
+  "version": "0.1.0",
   "private": true,
   "description": "Teal Brick Knowledge miniapp (opt2): canonical documents and walled memory areas over pinned upstream engines.",
   "license": "MIT",
@@ -9,10 +9,17 @@
   "scripts": {
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test 'test/**/*.test.ts'"
+    "lint": "biome check .",
+    "test": "node --test 'test/**/*.test.ts'",
+    "conformance": "node --test test/manifest.test.ts"
+  },
+  "dependencies": {
+    "@opt2-tealbrick/spec": "https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.0/opt2-tealbrick-spec-0.1.0.tgz"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.19.2",
+    "ajv": "8.17.1",
     "typescript": "^5.9.0"
   }
 }

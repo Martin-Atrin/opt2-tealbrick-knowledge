@@ -1,0 +1,4 @@
+#!/bin/sh
+# SDK restore part: the dump arrives on stdin; existing objects are replaced.
+set -eu
+PGPASSWORD="$POSTGRES_PASSWORD" exec pg_restore -h 127.0.0.1 -U postgres --clean --if-exists --no-owner -d gbrain

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Martin-Atrin/opt2-tealbrick-platform/main/ci/tealbrick-ci.schema.json",
+  "kind": "miniapp",
+  "paths": [
+    "."
+  ],
+  "images": [
+    { "name": "opt2-tealbrick-knowledge", "product": "knowledge", "productKind": "miniapp", "manifest": "tealbrick.manifest.json" }
+  ]
+}

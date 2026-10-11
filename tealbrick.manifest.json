@@ -1,0 +1,1641 @@
+{
+  "$schema": "https://spec.opt2.tealbrick.com/manifest.schema.json",
+  "schema": "tealbrick.miniapp/2",
+  "id": "knowledge",
+  "name": "Knowledge",
+  "summary": "Memory and documents for your agents: a private memory area per agent, a shared company area, research notebooks.",
+  "description": "Knowledge gives every connected agent its own memory area and a shared company area. Agents remember and recall through memory tools; documents keep revisions, comments and links. Memory runs on GBrain, research on Open Notebook, both inside your own deployment.",
+  "version": "0.1.0",
+  "sdkMajor": 1,
+  "publisher": {
+    "name": "Teal Brick"
+  },
+  "source": {
+    "repo": "https://github.com/Martin-Atrin/opt2-tealbrick-knowledge",
+    "license": "MIT"
+  },
+  "icon": {
+    "svgPath": "M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2 4.5V17h8v-3.5c.8-.9 2-2.3 2-4.5a6 6 0 0 0-6-6z M9 20h6 M10 22h4",
+    "viewBox": "0 0 24 24"
+  },
+  "discovery": {
+    "category": "memory",
+    "intents": [
+      "add memories",
+      "add memory to my agent",
+      "give my agent a memory",
+      "memory system",
+      "remember things",
+      "long term memory",
+      "recall past conversations",
+      "knowledge base",
+      "company knowledge base",
+      "shared knowledge between agents",
+      "store documents",
+      "document library",
+      "notes for my agents",
+      "research notebook",
+      "research sources",
+      "second brain",
+      "agent brain",
+      "memory garden",
+      "team memory",
+      "search my documents"
+    ],
+    "keywords": [
+      "memory",
+      "knowledge",
+      "documents",
+      "gbrain",
+      "open notebook",
+      "research",
+      "recall",
+      "notes"
+    ]
+  },
+  "runtime": {
+    "build": {
+      "context": ".",
+      "dockerfile": "Dockerfile"
+    },
+    "port": 8080,
+    "healthPath": "/tb/v1/health",
+    "resources": {
+      "cpu": 0.5,
+      "memoryMb": 768
+    },
+    "volumes": [
+      {
+        "id": "data",
+        "mountPath": "/data",
+        "sizeGb": 5,
+        "purpose": "data"
+      },
+      {
+        "id": "backup",
+        "mountPath": "/backup",
+        "sizeGb": 20,
+        "purpose": "backup"
+      }
+    ],
+    "env": [
+      {
+        "name": "KNOWLEDGE_ENGINE",
+        "setting": "engine"
+      },
+      {
+        "name": "KNOWLEDGE_RESEARCH",
+        "setting": "research"
+      },
+      {
+        "name": "KNOWLEDGE_MODEL_PROVIDER",
+        "setting": "model_provider"
+      },
+      {
+        "name": "KNOWLEDGE_GBRAIN_URL",
+        "value": "{{services.gbrain.url}}"
+      },
+      {
+        "name": "KNOWLEDGE_GBRAIN_ADMIN_TOKEN",
+        "value": "{{services.gbrain.env.GBRAIN_ADMIN_BOOTSTRAP_TOKEN}}"
+      },
+      {
+        "name": "KNOWLEDGE_NOTEBOOK_URL",
+        "value": "{{services.notebook.url}}"
+      },
+      {
+        "name": "KNOWLEDGE_NOTEBOOK_PASSWORD",
+        "value": "{{services.notebook.env.OPEN_NOTEBOOK_PASSWORD}}"
+      }
+    ],
+    "services": [
+      {
+        "id": "gbrain-db",
+        "title": "Memory database (Postgres + pgvector)",
+        "build": {
+          "context": "services/gbrain-db",
+          "dockerfile": "services/gbrain-db/Dockerfile"
+        },
+        "port": 5432,
+        "resources": {
+          "cpu": 0.5,
+          "memoryMb": 1024
+        },
+        "volumes": [
+          {
+            "id": "gbrain_pg",
+            "mountPath": "/var/lib/postgresql/data",
+            "sizeGb": 10,
+            "purpose": "data"
+          }
+        ],
+        "health": {
+          "kind": "tcp"
+        },
+        "env": [
+          {
+            "name": "POSTGRES_PASSWORD",
+            "generate": "secret"
+          },
+          {
+            "name": "POSTGRES_DB",
+            "value": "gbrain"
+          },
+          {
+            "name": "PGDATA",
+            "value": "/var/lib/postgresql/data/pgdata"
+          }
+        ],
+        "when": {
+          "engine": "gbrain"
+        },
+        "startOrder": 0,
+        "backup": {
+          "dump": [
+            "/usr/local/bin/gbrain-db-dump"
+          ],
+          "restore": [
+            "/usr/local/bin/gbrain-db-restore"
+          ],
+          "extension": "pgdump"
+        }
+      },
+      {
+        "id": "gbrain",
+        "title": "Memory engine (GBrain)",
+        "build": {
+          "context": "services/gbrain",
+          "dockerfile": "services/gbrain/Dockerfile"
+        },
+        "port": 3131,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 1536
+        },
+        "volumes": [
+          {
+            "id": "gbrain_home",
+            "mountPath": "/data",
+            "sizeGb": 2,
+            "purpose": "data"
+          }
+        ],
+        "health": {
+          "kind": "http",
+          "path": "/health"
+        },
+        "env": [
+          {
+            "name": "GBRAIN_ADMIN_BOOTSTRAP_TOKEN",
+            "generate": "secret"
+          },
+          {
+            "name": "GBRAIN_DB_PASSWORD",
+            "value": "{{services.gbrain-db.env.POSTGRES_PASSWORD}}"
+          },
+          {
+            "name": "GBRAIN_DB_HOST",
+            "value": "{{services.gbrain-db.host}}"
+          },
+          {
+            "name": "KNOWLEDGE_MODEL_PROVIDER",
+            "setting": "model_provider"
+          }
+        ],
+        "when": {
+          "engine": "gbrain"
+        },
+        "startOrder": 1,
+        "helper": {
+          "port": 3140,
+          "paths": [
+            "/sources"
+          ]
+        }
+      },
+      {
+        "id": "notebook-db",
+        "title": "Research database (SurrealDB)",
+        "build": {
+          "context": "services/notebook-db",
+          "dockerfile": "services/notebook-db/Dockerfile"
+        },
+        "port": 8000,
+        "resources": {
+          "cpu": 0.5,
+          "memoryMb": 512
+        },
+        "volumes": [
+          {
+            "id": "notebook_db",
+            "mountPath": "/mydata",
+            "sizeGb": 5,
+            "purpose": "data"
+          }
+        ],
+        "health": {
+          "kind": "http",
+          "path": "/health"
+        },
+        "env": [
+          {
+            "name": "SURREAL_USER",
+            "value": "knowledge"
+          },
+          {
+            "name": "SURREAL_PASS",
+            "generate": "secret"
+          }
+        ],
+        "when": {
+          "research": true
+        },
+        "startOrder": 0,
+        "backup": {
+          "dump": [
+            "/surreal",
+            "export",
+            "--endpoint",
+            "http://localhost:8000",
+            "--namespace",
+            "knowledge",
+            "--database",
+            "knowledge",
+            "/dev/stdout"
+          ],
+          "restore": [
+            "/surreal",
+            "import",
+            "--endpoint",
+            "http://localhost:8000",
+            "--namespace",
+            "knowledge",
+            "--database",
+            "knowledge",
+            "/dev/stdin"
+          ],
+          "extension": "surql"
+        }
+      },
+      {
+        "id": "notebook",
+        "title": "Research engine (Open Notebook)",
+        "build": {
+          "context": "services/notebook",
+          "dockerfile": "services/notebook/Dockerfile"
+        },
+        "port": 5055,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 1536
+        },
+        "volumes": [
+          {
+            "id": "notebook_data",
+            "mountPath": "/app/data",
+            "sizeGb": 5,
+            "purpose": "data"
+          }
+        ],
+        "health": {
+          "kind": "http",
+          "path": "/health"
+        },
+        "env": [
+          {
+            "name": "OPEN_NOTEBOOK_PASSWORD",
+            "generate": "secret"
+          },
+          {
+            "name": "OPEN_NOTEBOOK_ENCRYPTION_KEY",
+            "generate": "secret"
+          },
+          {
+            "name": "SURREAL_HOST",
+            "value": "{{services.notebook-db.host}}"
+          },
+          {
+            "name": "SURREAL_USER",
+            "value": "knowledge"
+          },
+          {
+            "name": "SURREAL_PASSWORD",
+            "value": "{{services.notebook-db.env.SURREAL_PASS}}"
+          },
+          {
+            "name": "SURREAL_NAMESPACE",
+            "value": "knowledge"
+          },
+          {
+            "name": "SURREAL_DATABASE",
+            "value": "knowledge"
+          },
+          {
+            "name": "OPEN_NOTEBOOK_ENABLE_DOCLING",
+            "value": "false"
+          },
+          {
+            "name": "OPEN_NOTEBOOK_ENABLE_CRAWL4AI",
+            "value": "false"
+          },
+          {
+            "name": "OPEN_NOTEBOOK_WORKER_MAX_TASKS",
+            "value": "1"
+          }
+        ],
+        "when": {
+          "research": true
+        },
+        "startOrder": 1
+      }
+    ]
+  },
+  "operations": [
+    {
+      "id": "recall",
+      "title": "Recall memories",
+      "description": "Search your memory: every area you can read (your own area and the company area), or one area. Returns ranked passages with the area each came from.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "type": "array"
+          },
+          "areas": {
+            "type": "array"
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "remember",
+      "title": "Remember",
+      "description": "Save a memory as a document in an area you can write to (default: your own area). It becomes searchable by recall.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "area": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "areas_list",
+      "title": "List areas",
+      "description": "List the memory areas you can read, with your access (read or read and write) and which one is your own.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "areas": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "collections_list",
+      "title": "List collections",
+      "description": "List document collections in an area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "collection_create",
+      "title": "Create collection",
+      "description": "Create a document collection in an area you can write to.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "area": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "documents_search",
+      "title": "Search documents",
+      "description": "Keyword search over document titles, summaries and bodies in all areas you can read, or in one area or collection.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "collectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hits": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "document_get",
+      "title": "Get document",
+      "description": "Read one document with its current body and version.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "document_create",
+      "title": "Create document",
+      "description": "Create a document in a collection (default: the area's default collection).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "collectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500000
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "area": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "document_update",
+      "title": "Update document",
+      "description": "Change a document. Pass expectedVersion to avoid overwriting someone else's edit; every change keeps a revision.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500000
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "document_delete",
+      "title": "Delete document",
+      "description": "Delete a document and remove it from memory search. The owner approves deletes.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "document_revisions",
+      "title": "List revisions",
+      "description": "List the revisions of a document, newest first.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revisions": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "comments_list",
+      "title": "List comments",
+      "description": "List comments on a document.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documentId"
+        ],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "comments": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "comment_add",
+      "title": "Add comment",
+      "description": "Add a comment (or a reply) to a document.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documentId",
+          "body"
+        ],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "links_list",
+      "title": "List links",
+      "description": "List a document's outgoing links and backlinks.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documentId"
+        ],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outbound": {
+            "type": "array"
+          },
+          "backlinks": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "link_add",
+      "title": "Link documents",
+      "description": "Link one document to another in the same area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceId",
+          "targetId"
+        ],
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "research_sources_list",
+      "title": "List research sources",
+      "description": "List the sources in an area's research notebook (needs research enabled).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sources": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "research_source_get",
+      "title": "Get research source",
+      "description": "Read one research source with its full text.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "research_notes_list",
+      "title": "List research notes",
+      "description": "List the notes in an area's research notebook.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "research_note_get",
+      "title": "Get research note",
+      "description": "Read one research note.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "research_source_add",
+      "title": "Add research source",
+      "description": "Add a text source to an area's research notebook.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "content"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500000
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "research_chat_start",
+      "title": "Start research chat",
+      "description": "Start a chat session over an area's research notebook.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "research_ask",
+      "title": "Ask research notebook",
+      "description": "Ask a question in a research chat session. The answer is grounded in the notebook's sources and notes.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "message"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32000
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "object"
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "scopeType": "area",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "research_chat_get",
+      "title": "Get research chat",
+      "description": "Read a research chat session with its messages.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "engine",
+      "title": "Memory engine tools",
+      "description": "Native memory engine operations (facts, entities, graph, timeline). Each appears as its own tool.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "agent",
+      "dynamic": {
+        "mode": "list",
+        "crudCeiling": [
+          "read",
+          "create",
+          "update",
+          "delete"
+        ],
+        "effectCeiling": "destructive"
+      }
+    },
+    {
+      "id": "indexing_status",
+      "title": "Indexing status",
+      "description": "Projection status of documents into the memory engine, per area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "areas": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    }
+  ],
+  "scopes": [
+    {
+      "type": "area",
+      "label": "Memory area",
+      "labelPlural": "Memory areas",
+      "access": [
+        {
+          "id": "read",
+          "label": "Read",
+          "crud": [
+            "read"
+          ]
+        },
+        {
+          "id": "read_write",
+          "label": "Read and write",
+          "crud": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ]
+        }
+      ],
+      "defaultGrants": [
+        {
+          "kind": "own",
+          "access": "read_write"
+        },
+        {
+          "kind": "shared",
+          "access": "read"
+        }
+      ],
+      "summaryTemplate": "{count} {labelPlural} ({access.read_write} write)"
+    }
+  ],
+  "settings": {
+    "steps": [
+      {
+        "id": "engine_step",
+        "title": "Memory engine",
+        "help": "Knowledge stores your documents itself and runs the memory engine beside it in your Railway project.",
+        "fields": [
+          {
+            "key": "engine",
+            "type": "enum",
+            "label": "Memory engine",
+            "required": true,
+            "default": "gbrain",
+            "mutable": false,
+            "choices": [
+              {
+                "value": "gbrain",
+                "label": "GBrain",
+                "note": "Sourced pages and facts, hybrid search, a typed graph of people and companies."
+              },
+              {
+                "value": "hindsight",
+                "label": "Hindsight",
+                "note": "Coming later",
+                "disabled": true
+              }
+            ]
+          },
+          {
+            "key": "research",
+            "type": "boolean",
+            "label": "Add research notebooks (Open Notebook)",
+            "help": "Adds a research service and its database to your project.",
+            "default": false,
+            "mutable": false
+          }
+        ]
+      },
+      {
+        "id": "models",
+        "title": "Model provider",
+        "when": {
+          "engine": "gbrain"
+        },
+        "help": "The memory engine needs an embedding model to search by meaning. Anthropic has no embeddings, so it also needs an OpenAI key.",
+        "fields": [
+          {
+            "key": "model_provider",
+            "type": "enum",
+            "label": "Model provider",
+            "required": true,
+            "default": "openai",
+            "mutable": false,
+            "choices": [
+              {
+                "value": "openai",
+                "label": "OpenAI"
+              },
+              {
+                "value": "google",
+                "label": "Google Gemini"
+              },
+              {
+                "value": "anthropic",
+                "label": "Anthropic (with OpenAI embeddings)"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "keys": [
+      {
+        "name": "OPENAI_API_KEY",
+        "label": "OpenAI API key",
+        "provider": "OpenAI",
+        "required": true,
+        "source": "account_default",
+        "usedBy": [
+          "gbrain",
+          "app"
+        ],
+        "when": {
+          "model_provider": [
+            "openai",
+            "anthropic"
+          ]
+        },
+        "step": "models"
+      },
+      {
+        "name": "ANTHROPIC_API_KEY",
+        "label": "Anthropic API key",
+        "provider": "Anthropic",
+        "required": true,
+        "source": "account_default",
+        "usedBy": [
+          "gbrain",
+          "app"
+        ],
+        "when": {
+          "model_provider": "anthropic"
+        },
+        "step": "models"
+      },
+      {
+        "name": "GOOGLE_GENERATIVE_AI_API_KEY",
+        "label": "Google Gemini API key",
+        "provider": "Google",
+        "required": true,
+        "source": "account_default",
+        "usedBy": [
+          "gbrain",
+          "app"
+        ],
+        "when": {
+          "model_provider": "google"
+        },
+        "step": "models"
+      }
+    ]
+  },
+  "skills": [
+    {
+      "id": "knowledge-memory",
+      "title": "How to use your memory",
+      "file": "skills/knowledge-memory/SKILL.md"
+    },
+    {
+      "id": "knowledge-gbrain",
+      "title": "Memory engine tools (GBrain)",
+      "file": "skills/knowledge-gbrain/SKILL.md",
+      "when": {
+        "engine": "gbrain"
+      }
+    },
+    {
+      "id": "knowledge-research",
+      "title": "Research notebooks",
+      "file": "skills/knowledge-research/SKILL.md",
+      "when": {
+        "research": true
+      }
+    }
+  ],
+  "harnessHints": [
+    {
+      "harness": "generic",
+      "instructions": "Call knowledge__recall before answering questions about past work, people or decisions. Save durable facts with knowledge__remember into your own area. Cite the area of each memory you use."
+    }
+  ],
+  "backups": {
+    "schedule": "23 2 * * *",
+    "retain": 14
+  },
+  "ui": {
+    "launchPath": "/",
+    "configurePath": "/configure"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": { "includes": ["src/**/*.ts", "test/**/*.ts", "services/**/*.ts", "!**/node_modules", "!**/dist", "!**/.tb-ci"] },
+  "formatter": { "enabled": false },
+  "linter": { "enabled": true, "rules": { "preset": "recommended", "suspicious": { "noExplicitAny": "off", "noTemplateCurlyInString": "off" } } }
+}

@@ -1,0 +1,4 @@
+#!/bin/sh
+# SDK backup part: custom-format dump of the GBrain database to stdout.
+set -eu
+PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U postgres -Fc gbrain
