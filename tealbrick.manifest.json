@@ -5,7 +5,7 @@
   "name": "Knowledge",
   "summary": "Memory and documents for your agents: a private memory area per agent, a shared company area, research notebooks.",
   "description": "Knowledge gives every connected agent its own memory area and a shared company area. Agents remember and recall through memory tools; documents keep revisions, comments and links. Memory runs on GBrain, research on Open Notebook, both inside your own deployment.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick"
@@ -58,7 +58,7 @@
       "context": ".",
       "dockerfile": "Dockerfile"
     },
-    "port": 8080,
+    "port": 5310,
     "healthPath": "/tb/v1/health",
     "resources": {
       "cpu": 0.5,

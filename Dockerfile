@@ -17,7 +17,7 @@ COPY migrations ./migrations
 COPY skills ./skills
 COPY src ./src
 COPY --from=ui /build/dist/ui ./dist/ui
-EXPOSE 8080
+EXPOSE 5310
 # Railway runs volume services as root (C38, RAILWAY_RUN_UID=0); src/main.ts takes ownership of the
 # volume mounts and drops to uid 1000.
 CMD ["node", "src/main.ts"]

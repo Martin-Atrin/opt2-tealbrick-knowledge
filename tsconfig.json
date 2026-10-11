@@ -23,6 +23,7 @@
   "include": [
     "src",
     "test",
-    "scripts"
+    "scripts",
+    "conformance.start.ts"
   ]
 }
