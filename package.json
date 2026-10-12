@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "test": "node --test 'test/**/*.test.ts'",
-    "conformance": "mkdir -p .conformance && tb-conformance app --start conformance.start.ts --manifest tealbrick.manifest.json --report .conformance/report",
+    "conformance": "mkdir -p .conformance && chmod 0777 .conformance && tb-conformance app --start conformance.start.ts --manifest tealbrick.manifest.json --report .conformance/report",
     "build": "tsc -p tsconfig.build.json && node scripts/build-ui.ts",
     "gen": "tb-gen all"
   },
