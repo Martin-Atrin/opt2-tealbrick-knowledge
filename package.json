@@ -1,6 +1,6 @@
 {
   "name": "opt2-tealbrick-knowledge",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Teal Brick Knowledge miniapp (opt2): canonical documents and walled memory areas over pinned upstream engines.",
   "license": "MIT",
@@ -18,8 +18,8 @@
     "gen": "tb-gen all"
   },
   "dependencies": {
-    "@opt2-tealbrick/manifest": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.4/opt2-tealbrick-manifest-0.1.4.tgz",
-    "@opt2-tealbrick/miniapp-sdk": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.6/opt2-tealbrick-miniapp-sdk-0.1.6.tgz",
+    "@opt2-tealbrick/manifest": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.5/opt2-tealbrick-manifest-0.1.5.tgz",
+    "@opt2-tealbrick/miniapp-sdk": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.9/opt2-tealbrick-miniapp-sdk-0.1.9.tgz",
     "@opt2-tealbrick/spec": "https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.7/opt2-tealbrick-spec-0.1.7.tgz"
   },
   "devDependencies": {
@@ -33,5 +33,5 @@
     "react-dom": "19.3.0",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0"
 }

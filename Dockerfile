@@ -6,11 +6,11 @@ WORKDIR /app
 ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY tsconfig.json tsconfig.build.json ./
 COPY scripts ./scripts
 COPY src ./src
-RUN pnpm run build && pnpm prune --prod
+RUN pnpm run build && pnpm prune --prod --config.ignore-scripts=true
 
 FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 WORKDIR /app

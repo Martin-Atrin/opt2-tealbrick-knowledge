@@ -1,9 +1,9 @@
 # GBrain memory engine: upstream source at a pinned commit, unmodified, + tb-exec wrapper + C6 source helper.
 # Build context: repository root.
-ARG TB_SDK_URL=https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/miniapp-sdk-v0.1.6/opt2-tealbrick-miniapp-sdk-0.1.6.tgz
 FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS tb
-ARG TB_SDK_URL
-RUN npm install --prefix /opt/tb --omit=dev --no-audit --no-fund "$TB_SDK_URL" && npm cache clean --force
+# C62/BSD-10: tb-exec from the integrity-pinned lock (services/tb-exec), no install scripts.
+COPY services/tb-exec/package.json services/tb-exec/package-lock.json /opt/tb/
+RUN npm ci --prefix /opt/tb --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 # tb-exec reads the app manifest (claim digest, helper, backup) from its default path.
 COPY tealbrick.manifest.json /opt/tb/tealbrick.manifest.json
 

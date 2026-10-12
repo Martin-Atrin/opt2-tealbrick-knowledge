@@ -12,7 +12,8 @@ starts the C6 helper). No upstream file is changed or vendored.
 | `notebook` | `lfnovo/open_notebook:1.14.0` | `entrypoint.sh` (composes `SURREAL_URL` from the private host) |
 | `notebook-db` | `surrealdb/surrealdb:v2.6.5` (binary copied onto node:24-slim so `tb-exec` can run) | nothing else |
 
-`tb-exec` (`dist/exec/cli.js`) comes from the `@opt2-tealbrick/miniapp-sdk` release tarball (`TB_SDK_URL` build argument), run by a
-Node 24 binary copied into the image.
+`tb-exec` (`dist/exec/cli.js`) comes from the `@opt2-tealbrick/miniapp-sdk` release tarball, installed with `npm ci --ignore-scripts`
+from `services/tb-exec/package-lock.json` (integrity-pinned, C62/BSD-10; bump the SDK there and run `npm install --package-lock-only --ignore-scripts`),
+run by a Node 24 binary copied into the image.
 
 All four images build with the repository root as context (they bake `tealbrick.manifest.json` into `/opt/tb/`, where tb-exec reads it).
