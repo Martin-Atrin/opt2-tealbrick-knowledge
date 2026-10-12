@@ -65,7 +65,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
   }
   function defaultArea(ctx: OpContext, area: unknown): string {
     const id = typeof area === "string" ? area : ownArea(ctx.caller);
-    if (!id) throw fail("area_required", "name an area", 400);
+    // A caller with no memory area of its own (a companion app, not an agent) has nothing to default to: scope_denied (0.1.12 conformance A12.companion_inbound).
+    if (!id) throw fail("scope_denied", "name an area you can access: this caller has no area of its own", 403);
     return id;
   }
   /** Area row with engine resources provisioned (provisioning runs lazily: it needs the helper call). */

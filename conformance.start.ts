@@ -9,7 +9,10 @@ const SETTINGS = { KNOWLEDGE_ENGINE: "gbrain", KNOWLEDGE_RESEARCH: "false", KNOW
 export default async function start(env: Record<string, string>): Promise<{ url: string; stop(): Promise<void>; backupNow(): Promise<void> }> {
   const full = { ...SETTINGS, ...env };
   const { definition, knowledge } = knowledgeDefinition(full, TbError);
-  const running = await startApp(defineApp(definition), full);
+  // Test roots (C63; suite default since spec 0.1.12): the suite passes TEST Portal Root Keys in TBCONF_PORTAL_ROOT_KEYS;
+  // only this harness reads it and hands them to startApp. Production never reads that variable.
+  const harness = env.TBCONF_PORTAL_ROOT_KEYS ? ({ portalRootKeys: JSON.parse(env.TBCONF_PORTAL_ROOT_KEYS) } as Parameters<typeof startApp>[2]) : undefined;
+  const running = await startApp(defineApp(definition), full, harness);
   return {
     url: `http://127.0.0.1:${manifest.runtime.port}`,
     stop: async () => {
