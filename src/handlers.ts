@@ -122,6 +122,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
               statuses.push({ area: outcome.area, ok: true, via: "keyword", ...(outcome.error ? { error: outcome.error } : {}) });
             }
           }
+          const fallbacks = statuses.filter((status) => status.via === "keyword");
+          if (engine && fallbacks.length) ctx.log.warn("recall fell back to keyword search", { areas: fallbacks.map((f) => `${f.area}:${f.error ?? "unknown"}`).join(",") });
           const results = mergeRanked(lists, (row) => row.documentId ?? `${row.area}:${row.slug}:${row.text.slice(0, 64)}`, limit).map((row) => ({
             documentId: row.documentId,
             title: row.title,

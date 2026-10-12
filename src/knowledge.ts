@@ -38,8 +38,10 @@ class SecretClientStore implements ClientStore {
   constructor(secrets: AppSecrets) {
     this.secrets = secrets;
   }
+  /** SDK secret names allow [A-Za-z0-9._:/-] only; the client key `<source>|<principal>` becomes `gbrain-client/<source>/<principal|shared>`. */
   private name(key: string) {
-    return `gbrain-client:${key}`;
+    const [source, principal] = key.split("|");
+    return `gbrain-client/${source}/${principal || "shared"}`;
   }
   async get(key: string): Promise<StoredClient | null> {
     const raw = await this.secrets.get(this.name(key));
@@ -170,12 +172,27 @@ export class Knowledge {
   }
 }
 
-/** Fallback before the SDK hands over its secret store (only reached in tests). */
+/** The SDK's app-secret name rule (miniapp-sdk app-secrets: 1..128 chars of [A-Za-z0-9._:/-]). */
+export const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
+
+/** Fallback before the SDK hands over its secret store (tests); enforces the SDK name rule so tests catch bad names. */
 export function memorySecrets(): AppSecrets {
   const values = new Map<string, string>();
+  const check = (name: string) => {
+    if (!SECRET_NAME.test(name)) throw Object.assign(new Error("secret name must be 1..128 chars of [A-Za-z0-9._:/-]"), { code: "secret_name_invalid" });
+  };
   return {
-    put: async (name, value) => void values.set(name, value),
-    get: async (name) => values.get(name) ?? null,
-    delete: async (name) => void values.delete(name),
+    put: async (name, value) => {
+      check(name);
+      values.set(name, value);
+    },
+    get: async (name) => {
+      check(name);
+      return values.get(name) ?? null;
+    },
+    delete: async (name) => {
+      check(name);
+      values.delete(name);
+    },
   };
 }

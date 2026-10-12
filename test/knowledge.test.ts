@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import { knowledgeDefinition } from "../src/app.ts";
-import { memorySecrets } from "../src/knowledge.ts";
+import { memorySecrets, SECRET_NAME } from "../src/knowledge.ts";
 import { context, type FakeGBrain, FakeScopes, fakeGBrain, memoryDb, TestError } from "./helpers.ts";
 
 const ADA = "agt_01AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -171,4 +171,22 @@ test("after a restore every live document is re-projected (engine state may diff
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM kn_projection WHERE state = 'pending' AND content_hash IS NULL").get()?.n, 1);
   await knowledge.current()?.projector?.drain();
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM kn_projection WHERE state = 'ready'").get()?.n, 1);
+});
+
+test("QA S2: recall uses GBrain when it is up (not degraded) and engine client credentials use valid SDK secret names", async () => {
+  const names: string[] = [];
+  const strict = memorySecrets();
+  const secrets = { ...strict, put: async (name: string, value: string) => (names.push(name), strict.put(name, value)) };
+  const { ctx, run, knowledge } = await setup();
+  const withSecrets = (agent: string) => ctx(agent, { secrets } as never);
+  const saved = await run("remember", { text: "GBrain path check: the quokka report" }, withSecrets(ADA));
+  await knowledge.current()?.projector?.drain();
+  gbrain.calls.length = 0;
+  const out = await run("recall", { query: "quokka report" }, withSecrets(ADA));
+  assert.equal(out.degraded, false, JSON.stringify(out.areas));
+  assert.ok(out.areas.every((a: Record<string, unknown>) => a.via === "engine"));
+  assert.ok(gbrain.calls.some((c) => c.name === "query"));
+  assert.equal(out.results[0].documentId, saved.documentId);
+  assert.ok(names.length > 0);
+  for (const name of names) assert.match(name, SECRET_NAME);
 });

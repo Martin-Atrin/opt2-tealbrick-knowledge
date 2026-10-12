@@ -47,6 +47,9 @@ export function knowledgeDefinition(env: Record<string, string | undefined>, TbE
         const services = knowledge.bind(ctx.db, ctx.secrets);
         await services.areas.ensureShared(ctx.scopes);
         await knowledge.provision(services, ctx as never);
+        // Rows that gave up while the engine was unusable (e.g. before 0.1.6 no engine token could be stored) retry at boot.
+        const retried = services.projector?.retryFailed() ?? 0;
+        if (retried) ctx.log.info("projection retry after boot", { rows: retried });
         knowledge.kick(services);
         ctx.log.info("knowledge started", { engine: services.engine ? "gbrain" : "none", research: services.notebook !== null, areas: services.areas.list().length });
       },
