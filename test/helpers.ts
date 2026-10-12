@@ -116,6 +116,8 @@ export function context(db: Db, scopes: FakeScopes, agentId: string, extra: Part
     workspace: "ws_01TESTWORKSPACE0000000000000" as `ws_${string}`,
     scopes: scopes.asStore(),
     secrets: memorySecrets(),
+    statusChanged: noop,
+    ownerLink: () => null,
     ...extra,
   };
 }

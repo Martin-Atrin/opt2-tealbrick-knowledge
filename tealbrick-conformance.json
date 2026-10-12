@@ -1,0 +1,14 @@
+{
+  "waivers": [
+    {
+      "id": "A12.caller_name",
+      "until": "0.1.12",
+      "reason": "conformance has no fixture hook for keyed areas / engine-less dynamic catalog; Specs adds setup fixtures in conformance 0.1.12 (waiver intended to expire 2026-10-27)"
+    },
+    {
+      "id": "A11.resolve_family",
+      "until": "0.1.12",
+      "reason": "conformance has no fixture hook for keyed areas / engine-less dynamic catalog; Specs adds setup fixtures in conformance 0.1.12 (waiver intended to expire 2026-10-27)"
+    }
+  ]
+}

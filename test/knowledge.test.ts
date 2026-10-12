@@ -29,7 +29,7 @@ async function setup() {
   const { definition, knowledge } = knowledgeDefinition(env, TestError, { drainIntervalMs: 0 });
   const log = { debug() {}, info() {}, warn() {}, error() {} };
   for (const [id, name] of [[ADA, "Ada"], [BO, "Bo"]] as const) {
-    await definition.events?.agentAdded?.({ id, name, mode: "free", status: "active" }, { db, scopes: scopes.asStore(), log });
+    await definition.events?.agentAdded?.({ id, name, mode: "free", status: "active" }, { db, scopes: scopes.asStore(), log, callApp: async () => { throw new Error("no companions"); }, statusChanged() {}, ownerLink: () => null });
     scopes.applyDefaults(id);
   }
   // C6 helper stand-in: `gbrain sources add` creates the source.
@@ -120,7 +120,7 @@ test("recall falls back to keyword search when the engine cannot answer (degrade
   const scopes = new FakeScopes();
   const { definition } = knowledgeDefinition({ KNOWLEDGE_ENGINE: "gbrain" }, TestError, { drainIntervalMs: 0 });
   const log = { debug() {}, info() {}, warn() {}, error() {} };
-  await definition.events?.agentAdded?.({ id: ADA, name: "Ada", mode: "free", status: "active" }, { db, scopes: scopes.asStore(), log });
+  await definition.events?.agentAdded?.({ id: ADA, name: "Ada", mode: "free", status: "active" }, { db, scopes: scopes.asStore(), log, callApp: async () => { throw new Error("no companions"); }, statusChanged() {}, ownerLink: () => null });
   scopes.applyDefaults(ADA);
   const spec = definition.handlers.remember as { run: (i: Json, c: OpContext) => Promise<Json> };
   await spec.run({ text: "the walrus sings at noon" }, context(db, scopes, ADA));
