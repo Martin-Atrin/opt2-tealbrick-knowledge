@@ -5,7 +5,7 @@
   "name": "Knowledge",
   "summary": "Memory and documents for your agents: a private memory area per agent, a shared company area, research notebooks.",
   "description": "Knowledge gives every connected agent its own memory area and a shared company area. Agents remember and recall through memory tools; documents keep revisions, comments and links. Memory runs on GBrain, research on Open Notebook, both inside your own deployment.",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick"
@@ -338,7 +338,7 @@
     {
       "id": "recall",
       "title": "Recall memories",
-      "description": "Search your memory: every area you can read (your own area and the company area), or one area. Returns ranked passages with the area each came from.",
+      "description": "Search your memory: every area you can read (your own area and the company area), or one area. Returns ranked passages with the area and the tags of each. The owner's rules may limit results to memories with certain tags.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -393,7 +393,7 @@
     {
       "id": "remember",
       "title": "Remember",
-      "description": "Save a memory as a document in an area you can write to (default: your own area). It becomes searchable by recall.",
+      "description": "Save a memory as a document in an area you can write to (default: your own area). It becomes searchable by recall. Add tags (for example work or personal): the owner's rules can limit recall to some tags.",
       "input": {
         "type": "object",
         "additionalProperties": false,

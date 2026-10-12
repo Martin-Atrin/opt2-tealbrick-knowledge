@@ -13,6 +13,7 @@ import { agentAreaId } from "./ids.ts";
 import type { AppSecrets, Knowledge, Services } from "./knowledge.ts";
 import { createLibraryHandlers } from "./library.ts";
 import { fanOut, mergeRanked } from "./merge.ts";
+import { NARROWING_UNSUPPORTED, type Narrowing, NarrowingError, readNarrowing, type TagFilter, tagsPass, untaggedPass } from "./narrowing.ts";
 import { StoreError } from "./store/documents.ts";
 
 /** The SDK's error class (CORE §8 envelope); injected so this module only depends on frozen types. */
@@ -29,9 +30,85 @@ const anyScope = () => null;
 
 const FAN_OUT_LIMIT = 4;
 
+/**
+ * G5 `rules.narrowing` per op (SDK-API §18). `items`: the handler keeps only items whose tags pass and returns `tags[]`
+ * on each item (so a Rules after hook can redact too). `untagged`: the items carry no tags (research notebooks), so
+ * only a narrowing without `anyOf` lets the call run. `none`: the output holds no memory items. Any other READ op
+ * (person library views, engine tools) refuses a tag narrowing with `narrowing_unsupported` (fail closed).
+ * Writes ignore the narrowing (it narrows what a call returns); research_ask is listed because it answers from notebook content.
+ */
+export const NARROWING_POLICY: Readonly<Record<string, "items" | "untagged" | "none" | "unsupported">> = {
+  recall: "items",
+  documents_search: "items",
+  document_get: "items",
+  document_revisions: "items",
+  comments_list: "items",
+  links_list: "items",
+  collections_list: "items",
+  collection_get: "items",
+  collection_tree: "items",
+  library_recall: "items",
+  library_documents: "items",
+  areas_list: "none",
+  research_sources_list: "untagged",
+  research_source_get: "untagged",
+  research_notes_list: "untagged",
+  research_note_get: "untagged",
+  research_chat_get: "untagged",
+  research_context_get: "untagged",
+  research_ask: "untagged",
+};
+
 export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
   const fail = (code: string, message: string, status: number) => new TbError(code, message, status);
   const notFound = () => fail("not_found", "not found", 404);
+
+  /** The narrowing each running call was admitted with (set by `narrowed` before the handler runs). */
+  const admitted = new WeakMap<object, Narrowing | null>();
+  const tagFilter = (ctx: OpContext): TagFilter | null => admitted.get(ctx)?.tags ?? null;
+
+  /**
+   * Reads and checks the call's narrowing before a read runs: unknown `v` / malformed → `narrowing_unsupported` (409);
+   * an op that cannot apply a tag narrowing refuses it. The rule id goes into the receipt meta.
+   */
+  function admit(policy: (typeof NARROWING_POLICY)[string], ctx: OpContext): void {
+    let narrowing: Narrowing | null;
+    try {
+      narrowing = readNarrowing(ctx.context);
+    } catch (error) {
+      if (error instanceof NarrowingError) throw fail(error.code, error.message, error.httpStatus);
+      throw error;
+    }
+    admitted.set(ctx, narrowing);
+    if (!narrowing) return;
+    ctx.receipt.meta({ narrowing: { v: narrowing.v, ruleId: narrowing.ruleId } });
+    if (!narrowing.tags || policy === "items" || policy === "none") return;
+    if (policy === "untagged" && untaggedPass(narrowing.tags)) return;
+    throw fail(
+      NARROWING_UNSUPPORTED,
+      policy === "untagged"
+        ? `research notebooks carry no memory tags, so this call cannot be limited to the tags Rules allows (rule ${narrowing.ruleId})`
+        : `this call cannot be limited to the memory tags Rules allows (rule ${narrowing.ruleId}); use recall or documents_search`,
+      409,
+    );
+  }
+
+  /** Applies `admit` to every op that returns content; writes (except research_ask) run unchanged. */
+  function narrowed(id: string, spec: HandlerSpec<In, Json>): HandlerSpec<In, Json> {
+    const run = spec.run;
+    return {
+      ...spec,
+      run: async (input, ctx) => {
+        const policy = NARROWING_POLICY[id] ?? (ctx.op?.effect === "read" ? "unsupported" : null);
+        if (policy) admit(policy, ctx);
+        return run(input, ctx);
+      },
+    };
+  }
+  /** A document the narrowing hides answers like a missing one. */
+  function visible(ctx: OpContext, doc: { tags: string[] }): void {
+    if (!tagsPass(doc.tags, tagFilter(ctx))) throw notFound();
+  }
 
   /** Map domain errors to the envelope; anything unknown propagates (SDK answers 500 and records `failed`). */
   const wrap = <T>(fn: () => Promise<T>) =>
@@ -92,24 +169,39 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
   }
   const actor = (ctx: OpContext) => ctx.caller.id;
 
-  /** Engine recall per area (fan-out), keyword fallback per area that cannot answer, one merged ranked answer. */
+  /**
+   * Engine recall per area (fan-out), keyword fallback per area that cannot answer, one merged ranked answer. Every
+   * result carries the canonical document's `tags` ([] for an engine page that is not a canonical document). Under a
+   * G5 narrowing only canonical documents whose tags pass are returned (an engine page of unknown tags never is).
+   */
   async function recallAcross(s: Services, ctx: OpContext, areas: string[], query: string, limit: number) {
     const engine = s.engine;
+    const filter = tagFilter(ctx);
+    // A narrowing drops rows after the engine ranked them: ask for more so a narrowed answer is not needlessly short.
+    const engineLimit = filter ? Math.min(limit * 3, 50) : limit;
     if (engine) await knowledge.provision(s, ctx).catch(() => undefined);
     const outcomes = await fanOut(areas, FAN_OUT_LIMIT, async (id) => {
       const area = s.areas.get(id);
       if (!engine || !area?.sourceReady) throw Object.assign(new Error("not ready"), { code: engine ? "area_not_ready" : "no_engine" });
-      return engine.recall(id, area.sourceId, query, limit, ctx.caller.id);
+      return engine.recall(id, area.sourceId, query, engineLimit, ctx.caller.id);
     });
-    const lists: { area: string; rows: RecallRow[] }[] = [];
+    type TaggedRow = RecallRow & { tags: string[] };
+    const lists: { area: string; rows: TaggedRow[] }[] = [];
     const statuses: { area: string; ok: boolean; via: "engine" | "keyword"; error?: string }[] = [];
     for (const outcome of outcomes) {
       if (outcome.ok && outcome.value) {
-        lists.push({ area: outcome.area, rows: outcome.value });
+        const rows = outcome.value;
+        const known = s.store.tagsOf(rows.flatMap((row) => (row.documentId ? [row.documentId] : [])));
+        const tagged = rows.flatMap((row): TaggedRow[] => {
+          const tags = row.documentId ? known.get(row.documentId) : undefined;
+          if (filter && (!tags || !tagsPass(tags, filter))) return [];
+          return [{ ...row, tags: tags ?? [] }];
+        });
+        lists.push({ area: outcome.area, rows: tagged });
         statuses.push({ area: outcome.area, ok: true, via: "engine" });
       } else {
-        const hits = s.store.search({ areas: [outcome.area], query, limit });
-        lists.push({ area: outcome.area, rows: hits.map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null })) });
+        const hits = s.store.search({ areas: [outcome.area], query, limit, tags: filter });
+        lists.push({ area: outcome.area, rows: hits.map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null, tags: hit.tags })) });
         statuses.push({ area: outcome.area, ok: true, via: "keyword", ...(outcome.error ? { error: outcome.error } : {}) });
       }
     }
@@ -119,6 +211,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
       documentId: row.documentId,
       title: row.title,
       text: row.text,
+      tags: row.tags,
       areas: row.areas,
     }));
     return { results, areas: statuses, partial: false, degraded: fallbacks.length > 0 };
@@ -184,7 +277,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const area = defaultArea(ctx, input.area);
           await readable(ctx, area);
-          return { collections: services(ctx).store.listCollections(area) as unknown as Json };
+          return { collections: services(ctx).store.listCollections(area, tagFilter(ctx)) as unknown as Json };
         }),
     },
 
@@ -205,7 +298,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
       run: (input, ctx) =>
         wrap(async () => {
           const areas = await targetAreas(ctx, input.area);
-          const hits = services(ctx).store.search({ areas, query: input.query, collectionId: input.collectionId, limit: input.limit });
+          const hits = services(ctx).store.search({ areas, query: input.query, collectionId: input.collectionId, limit: input.limit, tags: tagFilter(ctx) });
           return { hits: hits as unknown as Json };
         }),
     },
@@ -216,6 +309,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const doc = documentFor(services(ctx), String(input.id));
           await readable(ctx, doc.area);
+          visible(ctx, doc);
           return doc as unknown as Json;
         }),
     },
@@ -282,7 +376,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const s = services(ctx);
           const doc = documentFor(s, String(input.id));
           await readable(ctx, doc.area);
-          return { revisions: s.store.revisions(doc.id, input.limit) as unknown as Json };
+          visible(ctx, doc);
+          return { revisions: s.store.revisions(doc.id, input.limit, tagFilter(ctx)) as unknown as Json };
         }),
     },
 
@@ -293,6 +388,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const s = services(ctx);
           const doc = documentFor(s, String(input.documentId));
           await readable(ctx, doc.area);
+          visible(ctx, doc);
           return { comments: s.store.listComments(doc.id) as unknown as Json };
         }),
     },
@@ -316,7 +412,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const s = services(ctx);
           const doc = documentFor(s, String(input.documentId));
           await readable(ctx, doc.area);
-          return s.store.listLinks(doc.id) as unknown as Json;
+          visible(ctx, doc);
+          return s.store.listLinks(doc.id, tagFilter(ctx)) as unknown as Json;
         }),
     },
 
@@ -449,7 +546,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const collection = s.store.getCollection(String(input.id));
           if (!collection) throw notFound();
           await readable(ctx, collection.area);
-          const count = s.store.listCollections(collection.area).find((c) => c.id === collection.id)?.documentCount ?? 0;
+          const count = s.store.listCollections(collection.area, tagFilter(ctx)).find((c) => c.id === collection.id)?.documentCount ?? 0;
           return { ...collection, documentCount: count } as unknown as Json;
         }),
     },
@@ -462,7 +559,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const collection = s.store.getCollection(String(input.id));
           if (!collection) throw notFound();
           await readable(ctx, collection.area);
-          return { nodes: s.store.tree(collection.id) as unknown as Json };
+          return { nodes: s.store.tree(collection.id, tagFilter(ctx)) as unknown as Json };
         }),
     },
 
@@ -568,6 +665,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         if (!engine) throw fail("engine_capability_unavailable", "no memory engine in this deployment", 404);
         const op = engine.resolve(tool);
         if (!op) throw fail("engine_capability_unavailable", "this engine tool is not available", 404);
+        // G5: engine pages carry engine-side tags this app cannot match against the narrowing, so a narrowed read is refused.
+        if (op.effect === "read") admit("unsupported", ctx);
         const { area: requested, ...upstreamArgs } = args as In;
         // Writes, stateful reads and model-cost reads run in one area; stateless reads may fan out.
         const single = op.effect !== "read" || op.modelCost || !op.fanOut || typeof requested === "string";
@@ -612,7 +711,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
     },
   };
 
-  const library = createLibraryHandlers({ knowledge, services, wrap, fail, notFound, recallAcross, readyArea, notebookOf });
-  return { handlers: { ...handlers, ...library }, dynamic: { engine: engineDynamic }, events };
+  const library = createLibraryHandlers({ knowledge, services, wrap, fail, notFound, recallAcross, readyArea, notebookOf, tagFilter });
+  const all = Object.fromEntries(Object.entries({ ...handlers, ...library }).map(([id, spec]) => [id, narrowed(id, spec)]));
+  return { handlers: all, dynamic: { engine: engineDynamic }, events };
 }
 

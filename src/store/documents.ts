@@ -5,6 +5,7 @@
 import { opaqueDigest } from "@opt2-tealbrick/manifest";
 import type { Db } from "@opt2-tealbrick/spec/sdk";
 import { newId, slugify } from "../ids.ts";
+import { normalizeTag, type TagFilter } from "../narrowing.ts";
 
 export type DocumentStatus = "draft" | "published" | "archived";
 
@@ -40,6 +41,7 @@ export interface TreeNode {
   id: string;
   title: string;
   status: DocumentStatus;
+  tags: string[];
   updatedAt: number;
   children: TreeNode[];
 }
@@ -94,7 +96,27 @@ function toDocument(row: Row): Document {
 
 function cleanTags(tags: readonly string[] | undefined): string[] {
   if (!tags) return [];
-  return [...new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+  return [...new Set(tags.map(normalizeTag).filter(Boolean))].slice(0, 20);
+}
+
+/** SQL condition (G5 narrowing) on a document row alias: tags intersect `anyOf` and miss `noneOf`. Stored tags are normalized. */
+function tagCondition(filter: TagFilter | null | undefined, alias = "d"): { sql: string; params: string[] } {
+  if (!filter) return { sql: "", params: [] };
+  let sql = "";
+  const params: string[] = [];
+  const marks = (list: readonly string[]) => list.map(() => "?").join(", ");
+  if (filter.anyOf) {
+    if (!filter.anyOf.length) sql += " AND 0";
+    else {
+      sql += ` AND EXISTS (SELECT 1 FROM json_each(${alias}.tags) t WHERE t.value IN (${marks(filter.anyOf)}))`;
+      params.push(...filter.anyOf);
+    }
+  }
+  if (filter.noneOf?.length) {
+    sql += ` AND NOT EXISTS (SELECT 1 FROM json_each(${alias}.tags) t WHERE t.value IN (${marks(filter.noneOf)}))`;
+    params.push(...filter.noneOf);
+  }
+  return { sql, params };
 }
 
 /** Markdown page projected into the memory engine (identity = document id, never the title). */
@@ -177,13 +199,15 @@ export class DocumentStore {
     return row ? toCollection(row) : null;
   }
 
-  listCollections(area: string): (Collection & { documentCount: number })[] {
+  /** Collections of an area; `documentCount` counts only documents that pass `tags` (G5 narrowing) when given. */
+  listCollections(area: string, tags?: TagFilter | null): (Collection & { documentCount: number })[] {
+    const cond = tagCondition(tags);
     return this.db
       .prepare(
-        `SELECT c.*, (SELECT COUNT(*) FROM kn_documents d WHERE d.collection_id = c.id AND d.deleted_at IS NULL) AS document_count
+        `SELECT c.*, (SELECT COUNT(*) FROM kn_documents d WHERE d.collection_id = c.id AND d.deleted_at IS NULL${cond.sql}) AS document_count
          FROM kn_collections c WHERE c.area_id = ? AND c.deleted_at IS NULL ORDER BY c.is_default DESC, c.name`,
       )
-      .all(area)
+      .all(...cond.params, area)
       .map((row) => ({ ...toCollection(row), documentCount: num(row.document_count) }));
   }
 
@@ -201,17 +225,25 @@ export class DocumentStore {
     });
   }
 
-  /** Documents of a collection as a tree by parentId (children sorted by title). */
-  tree(collectionId: string): TreeNode[] {
+  /** Documents of a collection as a tree by parentId (children sorted by title); with `tags` only passing documents (a hidden parent's children move up). */
+  tree(collectionId: string, tags?: TagFilter | null): TreeNode[] {
+    const cond = tagCondition(tags);
     const rows = this.db
-      .prepare("SELECT id, parent_id, title, status, updated_at FROM kn_documents WHERE collection_id = ? AND deleted_at IS NULL ORDER BY title COLLATE NOCASE, id")
-      .all(collectionId);
+      .prepare(`SELECT id, parent_id, title, status, tags, updated_at FROM kn_documents d WHERE collection_id = ? AND deleted_at IS NULL${cond.sql} ORDER BY title COLLATE NOCASE, id`)
+      .all(collectionId, ...cond.params);
     const ids = new Set(rows.map((row) => String(row.id)));
     const byParent = new Map<string | null, TreeNode[]>();
     for (const row of rows) {
       const parent = str(row.parent_id);
       const key = parent && ids.has(parent) ? parent : null;
-      const node: TreeNode = { id: String(row.id), title: String(row.title), status: String(row.status) as DocumentStatus, updatedAt: num(row.updated_at), children: [] };
+      const node: TreeNode = {
+        id: String(row.id),
+        title: String(row.title),
+        status: String(row.status) as DocumentStatus,
+        tags: JSON.parse(String(row.tags)) as string[],
+        updatedAt: num(row.updated_at),
+        children: [],
+      };
       byParent.set(key, [...(byParent.get(key) ?? []), node]);
     }
     const attach = (nodes: TreeNode[]): TreeNode[] => nodes.map((node) => ({ ...node, children: attach(byParent.get(node.id) ?? []) }));
@@ -326,11 +358,20 @@ export class DocumentStore {
     });
   }
 
-  revisions(id: string, limit = 20): { version: number; title: string; summary: string | null; createdBy: string; createdAt: number }[] {
+  /** Newest revisions first; with `tags` only revisions whose own tags pass (G5 narrowing). */
+  revisions(id: string, limit = 20, tags?: TagFilter | null): { version: number; title: string; summary: string | null; tags: string[]; createdBy: string; createdAt: number }[] {
+    const cond = tagCondition(tags, "r");
     return this.db
-      .prepare("SELECT version, title, summary, created_by, created_at FROM kn_revisions WHERE document_id = ? ORDER BY version DESC LIMIT ?")
-      .all(id, Math.min(Math.max(limit, 1), 100))
-      .map((row) => ({ version: num(row.version), title: String(row.title), summary: str(row.summary), createdBy: String(row.created_by), createdAt: num(row.created_at) }));
+      .prepare(`SELECT version, title, summary, tags, created_by, created_at FROM kn_revisions r WHERE document_id = ?${cond.sql} ORDER BY version DESC LIMIT ?`)
+      .all(id, ...cond.params, Math.min(Math.max(limit, 1), 100))
+      .map((row) => ({
+        version: num(row.version),
+        title: String(row.title),
+        summary: str(row.summary),
+        tags: JSON.parse(String(row.tags)) as string[],
+        createdBy: String(row.created_by),
+        createdAt: num(row.created_at),
+      }));
   }
 
   revision(id: string, version: number) {
@@ -402,27 +443,43 @@ export class DocumentStore {
     if (this.db.prepare("DELETE FROM kn_links WHERE id = ?").run(id).changes === 0) throw notFound("link");
   }
 
-  listLinks(documentId: string): { outbound: Row[]; backlinks: Row[] } {
-    const map = (row: Row) => ({ id: String(row.id), type: String(row.type), documentId: String(row.doc_id), title: String(row.title), updatedAt: num(row.updated_at) });
+  /** Links of a document with the other end's title and tags; with `tags` only links whose other end passes (G5 narrowing). */
+  listLinks(documentId: string, tags?: TagFilter | null): { outbound: Row[]; backlinks: Row[] } {
+    const cond = tagCondition(tags);
+    const map = (row: Row) => ({ id: String(row.id), type: String(row.type), documentId: String(row.doc_id), title: String(row.title), tags: JSON.parse(String(row.tags)) as string[], updatedAt: num(row.updated_at) });
     const outbound = this.db
-      .prepare("SELECT l.id, l.type, d.id AS doc_id, d.title, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.target_id AND d.deleted_at IS NULL WHERE l.source_id = ? ORDER BY l.created_at")
-      .all(documentId)
+      .prepare(`SELECT l.id, l.type, d.id AS doc_id, d.title, d.tags, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.target_id AND d.deleted_at IS NULL${cond.sql} WHERE l.source_id = ? ORDER BY l.created_at`)
+      .all(...cond.params, documentId)
       .map(map);
     const backlinks = this.db
-      .prepare("SELECT l.id, l.type, d.id AS doc_id, d.title, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.source_id AND d.deleted_at IS NULL WHERE l.target_id = ? ORDER BY l.created_at")
-      .all(documentId)
+      .prepare(`SELECT l.id, l.type, d.id AS doc_id, d.title, d.tags, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.source_id AND d.deleted_at IS NULL${cond.sql} WHERE l.target_id = ? ORDER BY l.created_at`)
+      .all(...cond.params, documentId)
       .map(map);
     return { outbound, backlinks };
   }
 
+  /** Tags of live documents by id (ids not found are absent: deleted or unknown). */
+  tagsOf(ids: readonly string[]): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    const unique = [...new Set(ids)];
+    for (let i = 0; i < unique.length; i += 200) {
+      const chunk = unique.slice(i, i + 200);
+      const rows = this.db.prepare(`SELECT id, tags FROM kn_documents WHERE deleted_at IS NULL AND id IN (${chunk.map(() => "?").join(", ")})`).all(...chunk);
+      for (const row of rows) out.set(String(row.id), JSON.parse(String(row.tags)) as string[]);
+    }
+    return out;
+  }
+
   // ── search ──
 
-  search(input: { areas: readonly string[]; query?: string; collectionId?: string; limit?: number }): SearchHit[] {
+  /** Ranked (or newest-first) hits in the listed areas; with `tags` only documents that pass (G5 narrowing). */
+  search(input: { areas: readonly string[]; query?: string; collectionId?: string; limit?: number; tags?: TagFilter | null }): SearchHit[] {
     if (!input.areas.length) return [];
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
     const marks = input.areas.map(() => "?").join(", ");
-    const collectionFilter = input.collectionId ? " AND d.collection_id = ?" : "";
-    const params: unknown[] = [...input.areas, ...(input.collectionId ? [input.collectionId] : [])];
+    const cond = tagCondition(input.tags);
+    const collectionFilter = `${input.collectionId ? " AND d.collection_id = ?" : ""}${cond.sql}`;
+    const params: unknown[] = [...input.areas, ...(input.collectionId ? [input.collectionId] : []), ...cond.params];
     const match = input.query ? ftsQuery(input.query) : null;
     const hit = (row: Row): SearchHit => ({
       id: String(row.id),

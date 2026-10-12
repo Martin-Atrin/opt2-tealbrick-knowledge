@@ -6,6 +6,8 @@ import { after, before, test } from "node:test";
 import { validateInput } from "@opt2-tealbrick/manifest";
 import type { Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import { knowledgeDefinition } from "../src/app.ts";
+import { NARROWING_POLICY } from "../src/handlers.ts";
+import { areaSourceId } from "../src/ids.ts";
 import { memorySecrets, SECRET_NAME } from "../src/knowledge.ts";
 import { context, type FakeGBrain, FakeScopes, fakeGBrain, memoryDb, TestError } from "./helpers.ts";
 
@@ -49,7 +51,9 @@ async function setup() {
       const inputCheck = validateInput({ ...declared, standard: false } as never, input as never) as { ok: boolean };
       assert.ok(inputCheck.ok, `${name} input: ${JSON.stringify(inputCheck)}`);
     }
-    const output = (await handler(input as Json, c)) as Record<string, any>;
+    // The SDK hands every handler its OperationView (the G5 wrapper reads `op.effect` for ops it does not list).
+    const withOp = c.op ? c : ({ ...c, op: declared ? { ...declared, standard: false } : null } as OpContext);
+    const output = (await handler(input as Json, withOp)) as Record<string, any>;
     // The SDK refuses (500) an output that does not match the manifest output schema: check every call here too.
     const op = definition.manifest.operations.find((o) => o.id === name);
     if (op?.output) {
@@ -257,4 +261,120 @@ test("C58 person ops: the owner browses and curates every area", async () => {
   assert.equal((await run("library_research", { area: ADA_AREA }, owner)).enabled, false);
   await run("library_document_delete", { id: saved.documentId }, owner);
   await assert.rejects(run("library_document", { id: saved.documentId }, owner), rejects("not_found"));
+});
+
+// ── G5 `rules.narrowing` (SDK-API §18; QA R4) ──
+
+/** The context Rules' `rules_context` hook adds (opt2-tealbrick-rules src/hooks.ts): key `rules.narrowing`, value RulesNarrowingV1. */
+const narrowing = (memoryTags: Record<string, string[]>, v: unknown = 1) => ({ "rules.narrowing": { v, ruleId: "rul_01TESTRULE0000000000000000", reason: "team Support: work only", memoryTags } }) as OpContext["context"];
+
+async function taggedMemories() {
+  gbrain.pages.clear(); // the fake engine is shared by every test in this file
+  const env = await setup();
+  const { ctx, run, knowledge } = env;
+  const work = await run("remember", { text: "teal heron rollout plan for Acme", tags: ["work"] }, ctx(ADA));
+  const personal = await run("remember", { text: "teal heron birthday gift for my sister", tags: ["personal"] }, ctx(ADA));
+  const untagged = await run("remember", { text: "teal heron note without tags" }, ctx(ADA));
+  const both = await run("remember", { text: "teal heron offsite dinner", tags: ["Work", "personal"] }, ctx(ADA));
+  await run("recall", { query: "warm up" }, ctx(ADA)); // provisions the engine source
+  await knowledge.current()?.projector?.drain();
+  // A page written straight into the engine (gb_ tools), not a canonical document: its tags are unknown to Knowledge.
+  gbrain.pages.get(areaSourceId(ADA_AREA))?.set("notes/native-heron", { content: "teal heron native engine page", revision: "r0" });
+  return { ...env, work: work.documentId as string, personal: personal.documentId as string, untagged: untagged.documentId as string, both: both.documentId as string };
+}
+
+const ids = (results: Record<string, any>[]) => results.map((r) => r.documentId).sort();
+
+test("G5: recall with anyOf [work] returns only work-tagged memories, each with its tags (engine path)", async () => {
+  const { ctx, run, work, both } = await taggedMemories();
+  const plain = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA));
+  assert.equal(plain.degraded, false, JSON.stringify(plain.areas));
+  assert.equal(plain.results.length, 5, "4 canonical memories + 1 engine page without narrowing");
+  for (const r of plain.results) assert.ok(Array.isArray(r.tags) && r.tags.every((t: unknown) => typeof t === "string"), "every item carries tags[]");
+  assert.deepEqual(plain.results.find((r: Record<string, unknown>) => r.documentId === null)?.tags, []);
+
+  const metas: Json[] = [];
+  const narrowed = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }), receipt: { summary() {}, meta: (m: Json) => metas.push(m) } }));
+  assert.equal(narrowed.degraded, false);
+  assert.deepEqual(ids(narrowed.results), [work, both].sort());
+  assert.deepEqual(narrowed.results.find((r: Record<string, unknown>) => r.documentId === work)?.tags, ["work"]);
+  assert.deepEqual(narrowed.results.find((r: Record<string, unknown>) => r.documentId === both)?.tags, ["work", "personal"]);
+  assert.deepEqual(metas, [{ narrowing: { v: 1, ruleId: "rul_01TESTRULE0000000000000000" } }], "the rule id is recorded in the receipt meta");
+});
+
+test("G5: noneOf drops matching tags; an engine page of unknown tags never returns under a narrowing; tags compare case-insensitively", async () => {
+  const { ctx, run, work, untagged, both } = await taggedMemories();
+  const none = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ noneOf: ["personal"] }) }));
+  assert.deepEqual(ids(none.results), [work, untagged].sort());
+  const upper = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: [" WORK "] }) }));
+  assert.deepEqual(ids(upper.results), [work, both].sort());
+  const mixed = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: ["work"], noneOf: ["personal"] }) }));
+  assert.deepEqual(ids(mixed.results), [work]);
+  const empty = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: [] }) }));
+  assert.deepEqual(empty.results, [], "anyOf [] keeps nothing");
+});
+
+test("G5: unknown v or a malformed narrowing refuses with narrowing_unsupported (fail closed); no key = no narrowing", async () => {
+  const { ctx, run, definition } = await taggedMemories();
+  await assert.rejects(run("recall", { query: "teal heron" }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }, 2) })), rejects("narrowing_unsupported"));
+  await assert.rejects(run("documents_search", { query: "teal" }, ctx(ADA, { context: { "rules.narrowing": "work" } })), rejects("narrowing_unsupported"));
+  await assert.rejects(run("recall", { query: "teal" }, ctx(ADA, { context: { "rules.narrowing": { v: 1, ruleId: "rul_x", memoryTags: { anyOf: "work" } } } })), rejects("narrowing_unsupported"));
+  // Another app's context key is not a narrowing.
+  const other = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: { "kanban.narrowing": { v: 9 } } }));
+  assert.equal(other.results.length, 5);
+  // Writes are not narrowed (a narrowing limits what a call returns).
+  const saved = await run("remember", { text: "written under a narrowing" }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }, 2) }));
+  assert.ok(saved.documentId);
+  // Engine read tools cannot match engine-side tags: refused under a tag narrowing, allowed without one.
+  const dynamic = definition.dynamic?.engine;
+  assert.ok(dynamic);
+  await assert.rejects(dynamic.call("gb_get_page", { slug: "notes/native-heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }) })), rejects("narrowing_unsupported"));
+  await assert.rejects(dynamic.call("gb_get_page", { slug: "notes/native-heron", area: ADA_AREA }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }, 3) })), rejects("narrowing_unsupported"));
+  const page = (await dynamic.call("gb_get_page", { slug: "notes/native-heron", area: ADA_AREA }, ctx(ADA))) as Record<string, unknown>;
+  assert.equal(page.slug, "notes/native-heron");
+});
+
+test("G5: search, get, revisions, comments, links, collections and tree honour the narrowing", async () => {
+  const { ctx, run, work, personal, untagged, both } = await taggedMemories();
+  const n = (memoryTags: Record<string, string[]>) => ctx(ADA, { context: narrowing(memoryTags) });
+  const hits = await run("documents_search", { query: "teal heron", area: ADA_AREA }, n({ anyOf: ["work"] }));
+  assert.deepEqual(hits.hits.map((h: Record<string, unknown>) => h.id).sort(), [work, both].sort());
+  for (const h of hits.hits) assert.ok(h.tags.includes("work"));
+  assert.equal((await run("document_get", { id: work }, n({ anyOf: ["work"] }))).id, work);
+  await assert.rejects(run("document_get", { id: personal }, n({ anyOf: ["work"] })), rejects("not_found"));
+  await assert.rejects(run("document_get", { id: untagged }, n({ anyOf: ["work"] })), rejects("not_found"));
+  await assert.rejects(run("document_revisions", { id: personal }, n({ anyOf: ["work"] })), rejects("not_found"));
+  await assert.rejects(run("comments_list", { documentId: personal }, n({ anyOf: ["work"] })), rejects("not_found"));
+  await assert.rejects(run("links_list", { documentId: both }, n({ noneOf: ["personal"] })), rejects("not_found"));
+  // a work document that WAS personal keeps only the revisions whose own tags pass
+  await run("document_update", { id: personal, tags: ["work"], expectedVersion: 1 }, ctx(ADA));
+  const revs = await run("document_revisions", { id: personal }, n({ anyOf: ["work"] }));
+  assert.deepEqual(revs.revisions.map((r: Record<string, unknown>) => [r.version, r.tags]), [[2, ["work"]]]);
+  // links: a link to a hidden document is not listed
+  await run("link_add", { sourceId: work, targetId: untagged }, ctx(ADA));
+  await run("link_add", { sourceId: work, targetId: both }, ctx(ADA));
+  const links = await run("links_list", { documentId: work }, n({ anyOf: ["work"] }));
+  assert.deepEqual(links.outbound.map((l: Record<string, unknown>) => [l.documentId, l.tags]), [[both, ["work", "personal"]]]);
+  // collections: counts only visible documents; the tree lists only visible documents
+  const cols = await run("collections_list", { area: ADA_AREA }, n({ anyOf: ["work"] }));
+  const memories = cols.collections.find((c: Record<string, unknown>) => c.isDefault);
+  assert.equal(memories.documentCount, 3, "work, both, and the formerly personal document now tagged work");
+  assert.equal((await run("collection_get", { id: memories.id }, n({ anyOf: ["work"] }))).documentCount, 3);
+  assert.equal((await run("collection_get", { id: memories.id }, ctx(ADA))).documentCount, 4);
+  const tree = await run("collection_tree", { id: memories.id }, n({ noneOf: ["work"] }));
+  assert.deepEqual(tree.nodes.map((node: Record<string, unknown>) => node.id), [untagged]);
+});
+
+test("G5: research ops carry no tags — anyOf refuses, noneOf alone runs; every read op has a narrowing policy", async () => {
+  const { ctx, run, definition } = await setup();
+  await assert.rejects(run("research_sources_list", {}, ctx(ADA, { context: narrowing({ anyOf: ["work"] }) })), rejects("narrowing_unsupported"));
+  await assert.rejects(run("research_ask", { sessionId: "s1", message: "q" }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }) })), rejects("narrowing_unsupported"));
+  // noneOf alone: the call runs (here research is off, so the research engine answers research_disabled)
+  await assert.rejects(run("research_sources_list", {}, ctx(ADA, { context: narrowing({ noneOf: ["personal"] }) })), rejects("research_disabled"));
+  // Person library views (no hook context in practice) refuse a narrowing they cannot apply.
+  const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null }, context: narrowing({ anyOf: ["work"] }) });
+  await assert.rejects(run("library_overview", {}, owner), rejects("narrowing_unsupported"));
+  for (const op of definition.manifest.operations) {
+    if (op.effect === "read" && !op.dynamic && op.audience !== "person") assert.ok(NARROWING_POLICY[op.id], `agent read op ${op.id} has a G5 policy`);
+  }
 });

@@ -5,6 +5,7 @@ import type { HandlerSpec, Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import type { Area } from "./areas.ts";
 import type { NotebookClient } from "./engines/notebook/client.ts";
 import type { Knowledge, Services } from "./knowledge.ts";
+import type { TagFilter } from "./narrowing.ts";
 
 type In = Record<string, any>;
 
@@ -17,6 +18,8 @@ export interface LibraryDeps {
   recallAcross(s: Services, ctx: OpContext, areas: string[], query: string, limit: number): Promise<unknown>;
   readyArea(ctx: OpContext, s: Services, id: string, need: "source" | "notebook"): Promise<Area>;
   notebookOf(s: Services): NotebookClient;
+  /** G5 narrowing tag filter the call was admitted with (null = none) */
+  tagFilter(ctx: OpContext): TagFilter | null;
 }
 
 export function createLibraryHandlers(d: LibraryDeps): Record<string, HandlerSpec<In, Json>> {
@@ -67,7 +70,7 @@ export function createLibraryHandlers(d: LibraryDeps): Record<string, HandlerSpe
         wrap(async () => {
           const s = services(ctx);
           const areas = typeof input.area === "string" ? [area(s, input.area).id] : s.areas.list().map((a) => a.id);
-          return json({ hits: s.store.search({ areas, query: input.query, collectionId: input.collectionId, limit: input.limit ?? 50 }) });
+          return json({ hits: s.store.search({ areas, query: input.query, collectionId: input.collectionId, limit: input.limit ?? 50, tags: d.tagFilter(ctx) }) });
         }),
     },
 

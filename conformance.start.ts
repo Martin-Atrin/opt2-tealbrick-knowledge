@@ -36,10 +36,14 @@ export default async function start(env: Record<string, string>): Promise<{ url:
       : base;
   // Test roots (C63; suite default since spec 0.1.12): the suite passes TEST Portal Root Keys in TBCONF_PORTAL_ROOT_KEYS;
   // only this harness reads it and hands them to startApp. Production never reads that variable.
-  const harness = env.TBCONF_PORTAL_ROOT_KEYS ? ({ portalRootKeys: JSON.parse(env.TBCONF_PORTAL_ROOT_KEYS) } as Parameters<typeof startApp>[2]) : undefined;
+  // Port: the suite's free port (TBCONF_PORT, conformance ≥ 0.1.13; 0 = any free port), else manifest runtime.port.
+  const harness = {
+    ...(env.TBCONF_PORTAL_ROOT_KEYS ? { portalRootKeys: JSON.parse(env.TBCONF_PORTAL_ROOT_KEYS) } : {}),
+    port: env.TBCONF_PORT ? Number(env.TBCONF_PORT) : manifest.runtime.port,
+  } as Parameters<typeof startApp>[2];
   const running = await startApp(defineApp(definition), full, harness);
   return {
-    url: `http://127.0.0.1:${manifest.runtime.port}`,
+    url: `http://127.0.0.1:${running.port}`,
     stop: async () => {
       knowledge.stop();
       await running.stop();
