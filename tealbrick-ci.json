@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/Martin-Atrin/opt2-tealbrick-platform/main/ci/tealbrick-ci.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Martin-Atrin/opt2-tealbrick-platform/ci-v5/ci/tealbrick-ci.schema.json",
   "kind": "miniapp",
   "paths": [
     "."
@@ -8,36 +8,40 @@
     {
       "name": "opt2-tealbrick-knowledge",
       "product": "knowledge",
-      "productKind": "miniapp",
+      "kind": "app",
       "manifest": "tealbrick.manifest.json"
     },
     {
-      "name": "opt2-tealbrick-knowledge-gbrain",
-      "context": ".",
-      "dockerfile": "services/gbrain/Dockerfile",
-      "product": "knowledge",
-      "productKind": "service"
-    },
-    {
       "name": "opt2-tealbrick-knowledge-gbrain-db",
-      "context": ".",
-      "dockerfile": "services/gbrain-db/Dockerfile",
       "product": "knowledge",
-      "productKind": "service"
+      "kind": "service",
+      "service": "gbrain-db",
+      "context": ".",
+      "dockerfile": "services/gbrain-db/Dockerfile"
     },
     {
-      "name": "opt2-tealbrick-knowledge-notebook",
-      "context": ".",
-      "dockerfile": "services/notebook/Dockerfile",
+      "name": "opt2-tealbrick-knowledge-gbrain",
       "product": "knowledge",
-      "productKind": "service"
+      "kind": "service",
+      "service": "gbrain",
+      "context": ".",
+      "dockerfile": "services/gbrain/Dockerfile"
     },
     {
       "name": "opt2-tealbrick-knowledge-notebook-db",
-      "context": ".",
-      "dockerfile": "services/notebook-db/Dockerfile",
       "product": "knowledge",
-      "productKind": "service"
+      "kind": "service",
+      "service": "notebook-db",
+      "context": ".",
+      "dockerfile": "services/notebook-db/Dockerfile"
+    },
+    {
+      "name": "opt2-tealbrick-knowledge-notebook",
+      "product": "knowledge",
+      "kind": "service",
+      "service": "notebook",
+      "context": ".",
+      "dockerfile": "services/notebook/Dockerfile"
     }
   ]
 }
