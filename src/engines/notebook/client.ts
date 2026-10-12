@@ -98,7 +98,12 @@ export class NotebookClient {
       await response.body?.cancel();
       throw failure(response.status === 404 ? "not_found" : "upstream_rejected", response.status);
     }
+    if (response.status === 204) return null;
     const type = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    if (method === "DELETE" && type === "") {
+      await response.body?.cancel();
+      return null;
+    }
     if (type !== "application/json" && !type.endsWith("+json")) {
       await response.body?.cancel();
       throw failure("response_invalid", null);
@@ -172,6 +177,13 @@ export class NotebookClient {
     return id;
   }
 
+  /** Delete a source only after its membership in this notebook is proven. */
+  async deleteSource(notebookId: string, sourceId: string): Promise<void> {
+    const id = validId(sourceId, "source:");
+    if (!(await this.sourceIsMember(notebookId, id))) throw new NotebookError("not_found", "rejected", 404);
+    await this.request("DELETE", `/api/sources/${encodeURIComponent(id)}`);
+  }
+
   // ── notes ──
 
   async listNotes(notebookId: string): Promise<NoteSummary[]> {
@@ -205,6 +217,30 @@ export class NotebookClient {
       sources: Object.fromEntries(sources.map((source) => [source.id, "full content"])),
       notes: Object.fromEntries(notes.map((note) => [note.id, "full content"])),
     };
+  }
+
+  /** The notebook context research chat sees, built server-side from enumerated membership; membership re-checked after. */
+  async context(notebookId: string): Promise<{ sources: unknown[]; notes: unknown[]; tokenCount: number | null }> {
+    const nb = validId(notebookId, "notebook:");
+    const config = await this.contextConfig(nb);
+    let body: unknown;
+    try {
+      body = await this.request("POST", "/api/chat/context", { notebook_id: nb, context_config: config });
+    } catch (error) {
+      if (error instanceof NotebookError && error.status === 413) throw new NotebookError("context_limit_exceeded", "rejected", 413);
+      throw error;
+    }
+    const after = await this.contextConfig(nb);
+    const same = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort());
+    if (!same(config.sources, after.sources) || !same(config.notes, after.notes)) throw new NotebookError("context_membership_changed", "rejected", 409);
+    if (!isObject(body) || !isObject(body.context)) throw new NotebookError("response_invalid", "rejected");
+    const ctx = body.context;
+    const sources = Array.isArray(ctx.sources) ? ctx.sources : [];
+    const notes = Array.isArray(ctx.notes) ? ctx.notes : [];
+    // Nothing outside the enumerated membership may come back.
+    const allowed = new Set([...Object.keys(config.sources), ...Object.keys(config.notes)]);
+    for (const item of [...sources, ...notes]) if (!isObject(item) || typeof item.id !== "string" || !allowed.has(item.id)) throw new NotebookError("incomplete_context", "rejected");
+    return { sources, notes, tokenCount: typeof body.token_count === "number" ? body.token_count : null };
   }
 
   async createSession(notebookId: string, modelId: string, title?: string): Promise<string> {

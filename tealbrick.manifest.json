@@ -5,7 +5,7 @@
   "name": "Knowledge",
   "summary": "Memory and documents for your agents: a private memory area per agent, a shared company area, research notebooks.",
   "description": "Knowledge gives every connected agent its own memory area and a shared company area. Agents remember and recall through memory tools; documents keep revisions, comments and links. Memory runs on GBrain, research on Open Notebook, both inside your own deployment.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick"
@@ -1377,6 +1377,233 @@
       "audience": "agent"
     },
     {
+      "id": "collection_get",
+      "title": "Get collection",
+      "description": "Read one collection with its document count.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "collection_tree",
+      "title": "Collection tree",
+      "description": "Documents of a collection as a tree (parent and child documents).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "collection_delete",
+      "title": "Delete collection",
+      "description": "Delete a collection and every document in it (they leave memory search too). The owner approves deletes. The default collection cannot be deleted.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "documents": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "link_delete",
+      "title": "Delete link",
+      "description": "Remove a link between two documents. The owner approves deletes.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "research_context_get",
+      "title": "Research context",
+      "description": "The notebook's sources and notes assembled as one grounded context (what research chat sees).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "scopeType": "area",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "research_source_delete",
+      "title": "Delete research source",
+      "description": "Delete a source from an area's research notebook. The owner approves deletes.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id. Omit to use your own memory area."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "scopeType": "area",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
       "id": "engine",
       "title": "Memory engine tools",
       "description": "Native memory engine operations (facts, entities, graph, timeline). Each appears as its own tool.",
@@ -1423,6 +1650,762 @@
       "effect": "read",
       "idempotency": "none",
       "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_overview",
+      "title": "Library overview",
+      "description": "Every memory area with document and collection counts and engine status.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "areas": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_collections",
+      "title": "Library collections",
+      "description": "Collections of one area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          }
+        },
+        "required": [
+          "area"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_documents",
+      "title": "Library documents",
+      "description": "Search or list documents in one area, one collection, or every area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          },
+          "collectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hits": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_tree",
+      "title": "Library tree",
+      "description": "Documents of a collection as a tree.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "collectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "collectionId"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "type": "array"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_document",
+      "title": "Library document",
+      "description": "One document with its revisions, comments and links.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_revision",
+      "title": "Library revision",
+      "description": "One earlier revision of a document.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_document_create",
+      "title": "Create document (owner)",
+      "description": "Create a document in an area as the owner.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "area",
+          "title"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+          },
+          "collectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500000
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_document_update",
+      "title": "Edit document",
+      "description": "Edit a document as the owner (keeps a revision).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500000
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_document_delete",
+      "title": "Delete document (owner)",
+      "description": "Delete a document and remove it from memory search.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_collection_create",
+      "title": "Create collection (owner)",
+      "description": "Create a collection in an area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "area",
+          "name"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_collection_delete",
+      "title": "Delete collection (owner)",
+      "description": "Delete a collection and its documents.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "documents": {
+            "type": "integer"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_comment_add",
+      "title": "Comment (owner)",
+      "description": "Add a comment or reply to a document as the owner.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "documentId",
+          "body"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_link_delete",
+      "title": "Delete link (owner)",
+      "description": "Remove a link between two documents.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "library_recall",
+      "title": "Recall (owner)",
+      "description": "Search memory the way agents do, in one area or every area.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "type": "array"
+          },
+          "areas": {
+            "type": "array"
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "partial": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_research",
+      "title": "Research notebook",
+      "description": "Sources and notes of one area's research notebook.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          }
+        },
+        "required": [
+          "area"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sources": {
+            "type": "array"
+          },
+          "notes": {
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_research_item",
+      "title": "Research item",
+      "description": "One research source (full text) or note.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "area",
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object"
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "library_research_source_delete",
+      "title": "Delete research source (owner)",
+      "description": "Delete a source from an area's research notebook.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+            "description": "Area id."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "area",
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
       "audience": "person"
     }
   ],

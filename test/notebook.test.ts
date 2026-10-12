@@ -24,6 +24,15 @@ const server = createServer(async (req, res) => {
     const nb = u.searchParams.get("notebook_id");
     return json(200, [...sources].filter(([, s]) => s.notebook === nb).map(([id, s]) => ({ id, title: s.title, updated: "t" })));
   }
+  if (u.pathname.startsWith("/api/sources/") && req.method === "DELETE") {
+    sources.delete(decodeURIComponent(u.pathname.slice("/api/sources/".length)));
+    res.writeHead(204);
+    return res.end();
+  }
+  if (u.pathname === "/api/chat/context") {
+    const ids = Object.keys(body.context_config.sources);
+    return json(200, { context: { sources: ids.map((id) => ({ id, insights: [] })), notes: [] }, token_count: 42, char_count: 100 });
+  }
   if (u.pathname.startsWith("/api/sources/") && req.method === "GET") {
     const id = decodeURIComponent(u.pathname.slice("/api/sources/".length));
     const s = sources.get(id);
@@ -70,4 +79,16 @@ test("a failed execute is ambiguous (may have run); a model mismatch is rejected
   failExecute = true;
   await assert.rejects(client.ask(NB, session.id, "model:m1", "q"), (e: unknown) => e instanceof NotebookError && e.disposition === "ambiguous");
   failExecute = false;
+});
+
+test("context lists only the notebook's own sources; delete needs membership", async () => {
+  const client = new NotebookClient({ baseUrl: url, password: "pw" });
+  const id = await client.addTextSource(NB, "Temp", "to delete");
+  const ctx = await client.context(NB);
+  assert.ok(ctx.sources.every((item) => (item as { id: string }).id !== "source:s2"));
+  assert.equal(ctx.tokenCount, 42);
+  await assert.rejects(client.deleteSource(NB, "source:s2"), (e: unknown) => e instanceof NotebookError && e.code === "not_found");
+  assert.ok(sources.has("source:s2"));
+  await client.deleteSource(NB, id);
+  assert.equal(sources.has(id), false);
 });

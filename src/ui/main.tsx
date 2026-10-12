@@ -3,6 +3,9 @@ import { callOp, TbProvider, tbFetch, useAgents, useHolds, useScopes, useSession
 import { AppShell, BrandMark, Button, Notice, Select, STANDARD_PAGES, Tag } from "@opt2-tealbrick/ui";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Library, type LibraryNav } from "./library.tsx";
+import { Recall } from "./recall.tsx";
+import { Research } from "./research.tsx";
 
 
 interface AreaStatus {
@@ -253,17 +256,23 @@ function Backups() {
 }
 
 /** Own pages first, then the SDK standard pages; "Agents & scopes" is Knowledge's area access table. */
-const PAGES = [{ id: "status", label: "Memory status" }, ...STANDARD_PAGES];
+const PAGES = [{ id: "library", label: "Library" }, { id: "recall", label: "Recall" }, { id: "research", label: "Research" }, { id: "status", label: "Memory status" }, ...STANDARD_PAGES];
 
 function initialPage(): string {
   const rest = window.location.pathname.replace(/^\/a\/knowledge\/?/u, "");
   if (rest.startsWith("configure")) return "agents";
-  return PAGES.some((page) => page.id === rest) ? rest : "agents";
+  return PAGES.some((page) => page.id === rest) ? rest : "library";
 }
 
 function App() {
   const { status } = useSession();
   const [page, setPage] = useState(initialPage);
+  const [library, setLibrary] = useState<LibraryNav>({ area: "", collectionId: "", documentId: "" });
+  const patchLibrary = useCallback((patch: Partial<LibraryNav>) => setLibrary((prev) => ({ ...prev, ...patch })), []);
+  const openDocument = useCallback((documentId: string) => {
+    setLibrary((prev) => ({ ...prev, documentId }));
+    setPage("library");
+  }, []);
   const { areas, error, reload } = useAreas();
   const { holds } = useHolds({ status: "held" });
   if (status === "loading") return <p className="kn-muted">Loading…</p>;
@@ -272,6 +281,9 @@ function App() {
   return (
     <AppShell title="Knowledge" icon={<BrandMark size={22} />} pages={pages} current={page} onNavigate={setPage}>
       {error ? <Notice tone="action" role="alert">{error}</Notice> : null}
+      {page === "library" ? <Library nav={library} setNav={patchLibrary} /> : null}
+      {page === "recall" ? <Recall onOpen={openDocument} /> : null}
+      {page === "research" ? <Research /> : null}
       {page === "agents" ? <Configure areas={areas} /> : null}
       {page === "status" ? <Status areas={areas} reload={reload} /> : null}
       {page === "holds" ? <Holds /> : null}

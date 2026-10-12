@@ -10,3 +10,26 @@ body { margin: 0; background: var(--tb-bg, #fff); color: var(--tb-ink, #111); fo
 .kn-section { margin-top: 20px; }
 .kn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 640px) { .kn-table { font-size: 13px; } .kn-table th, .kn-table td { padding: 6px; } }
+.kn-split { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 20px; align-items: start; }
+.kn-side { border-right: 1px solid var(--tb-line); padding-right: 16px; }
+.kn-list { list-style: none; margin: 8px 0; padding: 0; }
+.kn-list li { padding: 4px 0; }
+.kn-tree { list-style: none; padding-left: 0; margin: 0; }
+.kn-tree .kn-tree { padding-left: 20px; }
+.kn-tree li { padding: 3px 0; }
+.kn-pick, .kn-link { font: inherit; text-align: left; cursor: pointer; border: 0; background: none; color: var(--tb-primary); padding: 2px 0; }
+.kn-link { text-decoration: underline; }
+.kn-pick { width: 100%; padding: 6px 8px; border-radius: 2px; color: var(--tb-ink); }
+.kn-pick[aria-pressed="true"] { background: var(--tb-teal-50); font-weight: 600; }
+.kn-pick:focus-visible, .kn-link:focus-visible { outline: 2px solid var(--tb-focus); outline-offset: 2px; border-radius: 2px; }
+.kn-pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; margin: 12px 0; padding: 12px; background: var(--tb-surface); border: 1px solid var(--tb-line); border-radius: 2px; font-family: var(--tb-font-mono, monospace); font-size: 13px; max-height: 480px; overflow: auto; }
+.kn-mono { font-family: var(--tb-font-mono, monospace); }
+.kn-wrap { overflow-wrap: anywhere; white-space: pre-wrap; margin: 4px 0; }
+.kn-clip { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 2px 0 0; }
+.kn-title { margin: 16px 0 8px; font-size: 20px; overflow-wrap: anywhere; }
+.kn-revision { border-left: 2px solid var(--tb-line-strong); padding-left: 12px; margin-top: 12px; }
+.kn-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+.kn-comment { border-left: 2px solid var(--tb-line); padding-left: 10px; margin: 8px 0; }
+.kn-result { border-bottom: 1px solid var(--tb-line); padding: 10px 0; }
+.kn-form { align-items: flex-end; }
+@media (max-width: 640px) { .kn-split { grid-template-columns: 1fr; } .kn-side { border-right: 0; padding-right: 0; border-bottom: 1px solid var(--tb-line); padding-bottom: 12px; } }

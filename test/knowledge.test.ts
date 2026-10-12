@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { validateInput } from "@opt2-tealbrick/manifest";
 import type { Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import { knowledgeDefinition } from "../src/app.ts";
 import { memorySecrets, SECRET_NAME } from "../src/knowledge.ts";
@@ -39,11 +40,23 @@ async function setup() {
     return {};
   }) as OpContext["callServiceHelper"];
   const ctx = (agent: string, extra: Partial<OpContext> = {}) => context(db, scopes, agent, { callServiceHelper, ...extra });
-  const run = async (op: string, input: Record<string, unknown>, c: OpContext) => {
-    const spec = definition.handlers[op];
+  const run = async (name: string, input: Record<string, unknown>, c: OpContext) => {
+    const spec = definition.handlers[name];
     const handler = typeof spec === "function" ? spec : spec?.run;
-    if (!handler) throw new Error(`no handler ${op}`);
-    return (await handler(input as Json, c)) as Record<string, any>;
+    if (!handler) throw new Error(`no handler ${name}`);
+    const declared = definition.manifest.operations.find((o) => o.id === name);
+    if (declared?.input) {
+      const inputCheck = validateInput({ ...declared, standard: false } as never, input as never) as { ok: boolean };
+      assert.ok(inputCheck.ok, `${name} input: ${JSON.stringify(inputCheck)}`);
+    }
+    const output = (await handler(input as Json, c)) as Record<string, any>;
+    // The SDK refuses (500) an output that does not match the manifest output schema: check every call here too.
+    const op = definition.manifest.operations.find((o) => o.id === name);
+    if (op?.output) {
+      const checked = validateInput({ ...op, standard: false, input: op.output } as never, output as never) as { ok: boolean };
+      assert.ok(checked.ok, `${name} output: ${JSON.stringify(checked)}`);
+    }
+    return output;
   };
   return { db, scopes, definition, knowledge, ctx, run, helperCalls };
 }
@@ -195,4 +208,53 @@ test("QA S2: recall uses GBrain when it is up (not degraded) and engine client c
   assert.equal(out.results[0].documentId, saved.documentId);
   assert.ok(names.length > 0);
   for (const name of names) assert.match(name, SECRET_NAME);
+});
+
+test("C58 agent ops: collection get/tree/delete and link delete stay inside the caller's writable areas", async () => {
+  const { ctx, run } = await setup();
+  await run("remember", { text: "seed the default collection" }, ctx(ADA));
+  const col = await run("collection_create", { name: "Projects" }, ctx(ADA));
+  const parent = await run("document_create", { title: "Plan", collectionId: col.id }, ctx(ADA));
+  const child = await run("document_create", { title: "Step", collectionId: col.id, parentId: parent.id }, ctx(ADA));
+  const tree = await run("collection_tree", { id: col.id }, ctx(ADA));
+  assert.equal(tree.nodes[0].id, parent.id);
+  assert.equal(tree.nodes[0].children[0].id, child.id);
+  assert.equal((await run("collection_get", { id: col.id }, ctx(ADA))).documentCount, 2);
+  await assert.rejects(run("collection_get", { id: col.id }, ctx(BO)), rejects("not_found"));
+  const link = await run("link_add", { sourceId: child.id, targetId: parent.id }, ctx(ADA));
+  await assert.rejects(run("link_delete", { id: link.id }, ctx(BO)), rejects("not_found"));
+  assert.equal((await run("link_delete", { id: link.id }, ctx(ADA))).deleted, true);
+  await assert.rejects(run("collection_delete", { id: col.id }, ctx(BO)), rejects("not_found"));
+  const deleted = await run("collection_delete", { id: col.id }, ctx(ADA));
+  assert.equal(deleted.documents, 2);
+  await assert.rejects(run("document_get", { id: parent.id }, ctx(ADA)), rejects("not_found"));
+  const def = (await run("collections_list", {}, ctx(ADA))).collections.find((c: Record<string, unknown>) => c.isDefault);
+  await assert.rejects(run("collection_delete", { id: def.id }, ctx(ADA)), rejects("default_collection"));
+});
+
+test("C58 person ops: the owner browses and curates every area", async () => {
+  const { ctx, run, knowledge } = await setup();
+  const saved = await run("remember", { text: "Ada's note about walruses" }, ctx(ADA));
+  const bo = await run("remember", { text: "Bo's note about walruses" }, ctx(BO));
+  const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null } });
+  const overview = await run("library_overview", {}, owner);
+  assert.deepEqual(overview.areas.map((a: Record<string, unknown>) => a.id).sort(), ["company", ADA_AREA, BO_AREA].sort());
+  assert.equal((await run("library_documents", { query: "walruses" }, owner)).hits.length, 2);
+  assert.equal((await run("library_documents", { area: ADA_AREA, query: "walruses" }, owner)).hits.length, 1);
+  const detail = await run("library_document", { id: saved.documentId }, owner);
+  assert.equal(detail.document.area, ADA_AREA);
+  assert.equal(detail.revisions.length, 1);
+  const edited = await run("library_document_update", { id: saved.documentId, body: "edited by owner", expectedVersion: 1 }, owner);
+  assert.equal(edited.version, 2);
+  await assert.rejects(run("library_document_update", { id: saved.documentId, body: "stale", expectedVersion: 1 }, owner), rejects("version_conflict"));
+  assert.equal((await run("library_revision", { id: saved.documentId, version: 1 }, owner)).body, "Ada's note about walruses");
+  await run("library_comment_add", { documentId: saved.documentId, body: "checked" }, owner);
+  assert.equal((await run("library_document", { id: saved.documentId }, owner)).comments.length, 1);
+  await knowledge.current()?.projector?.drain();
+  const recall = await run("library_recall", { query: "walruses" }, owner);
+  assert.equal(recall.degraded, false, JSON.stringify(recall.areas));
+  assert.ok(recall.results.some((r: Record<string, unknown>) => r.documentId === bo.documentId));
+  assert.equal((await run("library_research", { area: ADA_AREA }, owner)).enabled, false);
+  await run("library_document_delete", { id: saved.documentId }, owner);
+  await assert.rejects(run("library_document", { id: saved.documentId }, owner), rejects("not_found"));
 });

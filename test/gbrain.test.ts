@@ -33,8 +33,8 @@ test("argument guard refuses source selection, host access, private facts and fo
   assert.ok(argumentRefusal("remember", { visibility: "private" }));
   assert.ok(argumentRefusal("capture", { local_file: "/etc/passwd" }));
   assert.ok(argumentRefusal("search_by_image", { image_url: "file:///etc/passwd" }));
-  assert.ok(argumentRefusal("search_by_image", { image_url: "https://ex ample.com/a.png" }));
-  assert.equal(argumentRefusal("search_by_image", { image_url: "https://example.com/a.png" }), null);
+  assert.ok(argumentRefusal("search_by_image", { image_url: "https://example.com/a.png" }));
+  assert.equal(argumentRefusal("search_by_image", { image_data: "aGVsbG8=" }), null);
   assert.ok(argumentRefusal("takes_add", { local_dir: "/tmp" }));
   assert.ok(argumentRefusal("put_page", { slug: "knowledge-docs/kdoc_x", content: "x" }));
   assert.ok(argumentRefusal("put_page", { slug: "notes/a", content: "x", force: true }));
@@ -51,4 +51,19 @@ test("exposure at the pin: 88 tools exposed, every write classified, destructive
     if (op.crud.includes("delete")) assert.equal(op.holdFamily, "destructive", op.name);
   }
   assert.ok(exposure.excluded.has("sources_list"));
+});
+
+test("SEC-10: guard refuses all_sources, include_private, purge and forced delete/restore", () => {
+  for (const op of ["get_links", "get_backlinks", "traverse_graph", "code_callers", "code_callees"]) {
+    assert.ok(argumentRefusal(op, { slug: "a", all_sources: true }), op);
+    assert.equal(argumentRefusal(op, { slug: "a", all_sources: false }), null, op);
+  }
+  for (const op of ["context_pack", "delta"]) {
+    assert.ok(argumentRefusal(op, { include_private: true }), op);
+    assert.equal(argumentRefusal(op, { include_private: false }), null, op);
+  }
+  assert.ok(argumentRefusal("delete_page", { slug: "notes/a", purge: true }));
+  assert.ok(argumentRefusal("delete_page", { slug: "notes/a", force: true }));
+  assert.ok(argumentRefusal("restore_page", { slug: "notes/a", force: true }));
+  assert.equal(argumentRefusal("delete_page", { slug: "notes/a" }), null);
 });

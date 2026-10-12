@@ -36,6 +36,14 @@ export interface Document {
   updatedAt: number;
 }
 
+export interface TreeNode {
+  id: string;
+  title: string;
+  status: DocumentStatus;
+  updatedAt: number;
+  children: TreeNode[];
+}
+
 export class StoreError extends Error {
   readonly code: string;
   readonly httpStatus: number;
@@ -179,6 +187,51 @@ export class DocumentStore {
       .map((row) => ({ ...toCollection(row), documentCount: num(row.document_count) }));
   }
 
+  /** Soft-deletes a non-default collection and every live document in it (each queued for engine removal). */
+  deleteCollection(id: string, actor: string): { documents: number } {
+    return this.db.transaction(() => {
+      const collection = this.getCollection(id);
+      if (!collection) throw notFound("collection");
+      if (collection.isDefault) throw new StoreError("default_collection", "the default collection cannot be deleted", 409);
+      const docs = this.db.prepare("SELECT id FROM kn_documents WHERE collection_id = ? AND deleted_at IS NULL").all(id);
+      for (const row of docs) this.deleteDocument(String(row.id), actor);
+      const at = this.now();
+      this.db.prepare("UPDATE kn_collections SET deleted_at = ?, updated_at = ? WHERE id = ?").run(at, at, id);
+      return { documents: docs.length };
+    });
+  }
+
+  /** Documents of a collection as a tree by parentId (children sorted by title). */
+  tree(collectionId: string): TreeNode[] {
+    const rows = this.db
+      .prepare("SELECT id, parent_id, title, status, updated_at FROM kn_documents WHERE collection_id = ? AND deleted_at IS NULL ORDER BY title COLLATE NOCASE, id")
+      .all(collectionId);
+    const ids = new Set(rows.map((row) => String(row.id)));
+    const byParent = new Map<string | null, TreeNode[]>();
+    for (const row of rows) {
+      const parent = str(row.parent_id);
+      const key = parent && ids.has(parent) ? parent : null;
+      const node: TreeNode = { id: String(row.id), title: String(row.title), status: String(row.status) as DocumentStatus, updatedAt: num(row.updated_at), children: [] };
+      byParent.set(key, [...(byParent.get(key) ?? []), node]);
+    }
+    const attach = (nodes: TreeNode[]): TreeNode[] => nodes.map((node) => ({ ...node, children: attach(byParent.get(node.id) ?? []) }));
+    return attach(byParent.get(null) ?? []);
+  }
+
+  /** Live document and collection counts per area. */
+  countsByArea(): Map<string, { documents: number; collections: number }> {
+    const out = new Map<string, { documents: number; collections: number }>();
+    for (const row of this.db.prepare("SELECT area_id, COUNT(*) AS n FROM kn_documents WHERE deleted_at IS NULL GROUP BY area_id").all()) {
+      out.set(String(row.area_id), { documents: num(row.n), collections: 0 });
+    }
+    for (const row of this.db.prepare("SELECT area_id, COUNT(*) AS n FROM kn_collections WHERE deleted_at IS NULL GROUP BY area_id").all()) {
+      const entry = out.get(String(row.area_id)) ?? { documents: 0, collections: 0 };
+      entry.collections = num(row.n);
+      out.set(String(row.area_id), entry);
+    }
+    return out;
+  }
+
   // ── documents ──
 
   getDocument(id: string): Document | null {
@@ -280,6 +333,21 @@ export class DocumentStore {
       .map((row) => ({ version: num(row.version), title: String(row.title), summary: str(row.summary), createdBy: String(row.created_by), createdAt: num(row.created_at) }));
   }
 
+  revision(id: string, version: number) {
+    const row = this.db.prepare("SELECT * FROM kn_revisions WHERE document_id = ? AND version = ?").get(id, version);
+    if (!row) throw notFound("revision");
+    return {
+      version: num(row.version),
+      title: String(row.title),
+      summary: str(row.summary),
+      body: String(row.body),
+      status: String(row.status),
+      tags: JSON.parse(String(row.tags)) as string[],
+      createdBy: String(row.created_by),
+      createdAt: num(row.created_at),
+    };
+  }
+
   private writeRevision(documentId: string, version: number, title: string, summary: string | null, body: string, status: string, tags: string, actor: string, at: number) {
     this.db
       .prepare("INSERT INTO kn_revisions (id, document_id, version, title, summary, body, status, tags, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -322,6 +390,16 @@ export class DocumentStore {
     const id = newId("klnk");
     this.db.prepare("INSERT INTO kn_links (id, area_id, source_id, target_id, type, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, source.area, sourceId, targetId, type, actor, this.now());
     return { id };
+  }
+
+  /** The link with the area it lives in (both ends are in that area). */
+  getLink(id: string): { id: string; area: string; sourceId: string; targetId: string } | null {
+    const row = this.db.prepare("SELECT id, area_id, source_id, target_id FROM kn_links WHERE id = ?").get(id);
+    return row ? { id: String(row.id), area: String(row.area_id), sourceId: String(row.source_id), targetId: String(row.target_id) } : null;
+  }
+
+  deleteLink(id: string): void {
+    if (this.db.prepare("DELETE FROM kn_links WHERE id = ?").run(id).changes === 0) throw notFound("link");
   }
 
   listLinks(documentId: string): { outbound: Row[]; backlinks: Row[] } {

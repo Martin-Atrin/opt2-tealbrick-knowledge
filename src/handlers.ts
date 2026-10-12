@@ -11,6 +11,7 @@ import { resolveEntry as engineResolve } from "./engines/gbrain/exposure.ts";
 import { NotebookError } from "./engines/notebook/client.ts";
 import { agentAreaId } from "./ids.ts";
 import type { AppSecrets, Knowledge, Services } from "./knowledge.ts";
+import { createLibraryHandlers } from "./library.ts";
 import { fanOut, mergeRanked } from "./merge.ts";
 import { StoreError } from "./store/documents.ts";
 
@@ -90,6 +91,38 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
   }
   const actor = (ctx: OpContext) => ctx.caller.id;
 
+  /** Engine recall per area (fan-out), keyword fallback per area that cannot answer, one merged ranked answer. */
+  async function recallAcross(s: Services, ctx: OpContext, areas: string[], query: string, limit: number) {
+    const engine = s.engine;
+    if (engine) await knowledge.provision(s, ctx).catch(() => undefined);
+    const outcomes = await fanOut(areas, FAN_OUT_LIMIT, async (id) => {
+      const area = s.areas.get(id);
+      if (!engine || !area?.sourceReady) throw Object.assign(new Error("not ready"), { code: engine ? "area_not_ready" : "no_engine" });
+      return engine.recall(id, area.sourceId, query, limit, ctx.caller.id);
+    });
+    const lists: { area: string; rows: RecallRow[] }[] = [];
+    const statuses: { area: string; ok: boolean; via: "engine" | "keyword"; error?: string }[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.ok && outcome.value) {
+        lists.push({ area: outcome.area, rows: outcome.value });
+        statuses.push({ area: outcome.area, ok: true, via: "engine" });
+      } else {
+        const hits = s.store.search({ areas: [outcome.area], query, limit });
+        lists.push({ area: outcome.area, rows: hits.map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null })) });
+        statuses.push({ area: outcome.area, ok: true, via: "keyword", ...(outcome.error ? { error: outcome.error } : {}) });
+      }
+    }
+    const fallbacks = statuses.filter((status) => status.via === "keyword");
+    if (engine && fallbacks.length) ctx.log.warn("recall fell back to keyword search", { areas: fallbacks.map((f) => `${f.area}:${f.error ?? "unknown"}`).join(",") });
+    const results = mergeRanked(lists, (row) => row.documentId ?? `${row.area}:${row.slug}:${row.text.slice(0, 64)}`, limit).map((row) => ({
+      documentId: row.documentId,
+      title: row.title,
+      text: row.text,
+      areas: row.areas,
+    }));
+    return { results, areas: statuses, partial: false, degraded: fallbacks.length > 0 };
+  }
+
   const handlers: Record<string, HandlerSpec<In, Json>> = {
     recall: {
       scope: readScope,
@@ -99,38 +132,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const s = services(ctx);
           const areas = await targetAreas(ctx, input.area);
           const limit = Math.min(Number(input.limit ?? 10), 50);
-          const engine = s.engine;
-          if (engine) await knowledge.provision(s, ctx).catch(() => undefined);
-          const outcomes = await fanOut(areas, FAN_OUT_LIMIT, async (id) => {
-            const area = s.areas.get(id);
-            if (!engine || !area?.sourceReady) throw Object.assign(new Error("not ready"), { code: engine ? "area_not_ready" : "no_engine" });
-            return engine.recall(id, area.sourceId, String(input.query), limit, ctx.caller.id);
-          });
-          // Areas the engine could not answer fall back to keyword search over the canonical store.
-          const lists: { area: string; rows: RecallRow[] }[] = [];
-          const statuses: { area: string; ok: boolean; via: "engine" | "keyword"; error?: string }[] = [];
-          for (const outcome of outcomes) {
-            if (outcome.ok && outcome.value) {
-              lists.push({ area: outcome.area, rows: outcome.value });
-              statuses.push({ area: outcome.area, ok: true, via: "engine" });
-            } else {
-              const hits = s.store.search({ areas: [outcome.area], query: String(input.query), limit });
-              lists.push({
-                area: outcome.area,
-                rows: hits.map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null })),
-              });
-              statuses.push({ area: outcome.area, ok: true, via: "keyword", ...(outcome.error ? { error: outcome.error } : {}) });
-            }
-          }
-          const fallbacks = statuses.filter((status) => status.via === "keyword");
-          if (engine && fallbacks.length) ctx.log.warn("recall fell back to keyword search", { areas: fallbacks.map((f) => `${f.area}:${f.error ?? "unknown"}`).join(",") });
-          const results = mergeRanked(lists, (row) => row.documentId ?? `${row.area}:${row.slug}:${row.text.slice(0, 64)}`, limit).map((row) => ({
-            documentId: row.documentId,
-            title: row.title,
-            text: row.text,
-            areas: row.areas,
-          }));
-          return { results, areas: statuses, partial: false, degraded: statuses.some((status) => status.via === "keyword") } as Json;
+          return (await recallAcross(s, ctx, areas, String(input.query), limit)) as Json;
         }),
     },
 
@@ -438,6 +440,91 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         }),
     },
 
+    collection_get: {
+      scope: anyScope,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const collection = s.store.getCollection(String(input.id));
+          if (!collection) throw notFound();
+          await readable(ctx, collection.area);
+          const count = s.store.listCollections(collection.area).find((c) => c.id === collection.id)?.documentCount ?? 0;
+          return { ...collection, documentCount: count } as unknown as Json;
+        }),
+    },
+
+    collection_tree: {
+      scope: anyScope,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const collection = s.store.getCollection(String(input.id));
+          if (!collection) throw notFound();
+          await readable(ctx, collection.area);
+          return { nodes: s.store.tree(collection.id) as unknown as Json };
+        }),
+    },
+
+    collection_delete: {
+      scope: anyScope,
+      redact: (input) => `delete collection ${input.id}`,
+      holdView: (input) => `An agent asks to delete collection ${input.id} and every document in it. The documents leave memory search; revisions stay in backups.`,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const collection = s.store.getCollection(String(input.id));
+          if (!collection) throw notFound();
+          await writable(ctx, collection.area, "delete");
+          const { documents } = s.store.deleteCollection(collection.id, actor(ctx));
+          knowledge.kick(s);
+          return { id: collection.id, deleted: true, documents };
+        }),
+    },
+
+    link_delete: {
+      scope: anyScope,
+      redact: (input) => `delete link ${input.id}`,
+      holdView: (input) => `An agent asks to remove link ${input.id} between two documents.`,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const link = s.store.getLink(String(input.id));
+          if (!link) throw notFound();
+          await writable(ctx, link.area, "delete");
+          s.store.deleteLink(link.id);
+          return { id: link.id, deleted: true };
+        }),
+    },
+
+    research_context_get: {
+      scope: readScope,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const notebook = notebookOf(s);
+          const id = defaultArea(ctx, input.area);
+          await readable(ctx, id);
+          const area = await readyArea(ctx, s, id, "notebook");
+          return (await notebook.context(area.notebookId as string)) as unknown as Json;
+        }),
+    },
+
+    research_source_delete: {
+      scope: writeScope,
+      redact: (input) => `delete research source ${input.id}`,
+      holdView: (input) => `An agent asks to delete research source ${input.id} from ${input.area ?? "its own"} notebook.`,
+      run: (input, ctx) =>
+        wrap(async () => {
+          const s = services(ctx);
+          const notebook = notebookOf(s);
+          const id = defaultArea(ctx, input.area);
+          await writable(ctx, id, "delete");
+          const area = await readyArea(ctx, s, id, "notebook");
+          await notebook.deleteSource(area.notebookId as string, String(input.id));
+          return { id: String(input.id), deleted: true };
+        }),
+    },
+
     indexing_status: {
       run: (_input, ctx) =>
         wrap(async () => {
@@ -524,6 +611,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
     },
   };
 
-  return { handlers, dynamic: { engine: engineDynamic }, events };
+  const library = createLibraryHandlers({ knowledge, services, wrap, fail, notFound, recallAcross, readyArea, notebookOf });
+  return { handlers: { ...handlers, ...library }, dynamic: { engine: engineDynamic }, events };
 }
 
