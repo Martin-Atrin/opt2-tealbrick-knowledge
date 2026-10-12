@@ -110,7 +110,7 @@ packages:
     hasBin: true
 
   '@opt2-tealbrick/manifest@https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.4/opt2-tealbrick-manifest-0.1.4.tgz':
-    resolution: {tarball: https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.4/opt2-tealbrick-manifest-0.1.4.tgz}
+    resolution: {integrity: sha512-vzrRPC18iUczdcTzwQd16XcKJbmaFyi9mwbt+itKWzwVTvjHOPQ10fxRNujVSLXbdaLtAr9gIQeOECeYMPuHKg==, tarball: https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.4/opt2-tealbrick-manifest-0.1.4.tgz}
     version: 0.1.4
 
   '@opt2-tealbrick/manifest@https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.5/opt2-tealbrick-manifest-0.1.5.tgz':
@@ -132,7 +132,7 @@ packages:
     version: 0.1.7
 
   '@opt2-tealbrick/spec@https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.8/opt2-tealbrick-spec-0.1.8.tgz':
-    resolution: {tarball: https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.8/opt2-tealbrick-spec-0.1.8.tgz}
+    resolution: {integrity: sha512-9CKvbajAETAxNwUa3ZbEopWSd/t9/twlttH+Tcu2/q2zz5yiKqV5ZR79vk+ghbA85Nih9waQjImougTFkUPr/g==, tarball: https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.8/opt2-tealbrick-spec-0.1.8.tgz}
     version: 0.1.8
 
   '@opt2-tealbrick/ui@https://github.com/Martin-Atrin/opt2-tealbrick-packages/releases/download/ui-v0.1.1/opt2-tealbrick-ui-0.1.1.tgz':
