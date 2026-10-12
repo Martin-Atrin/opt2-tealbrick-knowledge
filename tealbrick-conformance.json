@@ -1,14 +1,40 @@
 {
-  "waivers": [
+  "setup": [
     {
-      "id": "A12.caller_name",
-      "until": "0.1.12",
-      "reason": "conformance has no fixture hook for keyed areas / engine-less dynamic catalog; Specs adds setup fixtures in conformance 0.1.12 (waiver intended to expire 2026-10-27)"
+      "id": "agent_a_areas",
+      "as": "agentA",
+      "op": "areas_list",
+      "input": {},
+      "capture": {
+        "area0": "/areas/0/id"
+      }
     },
     {
-      "id": "A11.resolve_family",
-      "until": "0.1.12",
-      "reason": "conformance has no fixture hook for keyed areas / engine-less dynamic catalog; Specs adds setup fixtures in conformance 0.1.12 (waiver intended to expire 2026-10-27)"
+      "id": "app_area_grant",
+      "as": "owner",
+      "op": "tb.scopes_set",
+      "input": {
+        "agent": "${tb.app}",
+        "type": "area",
+        "id": "${area0}",
+        "access": "read_write"
+      }
     }
-  ]
+  ],
+  "inputsAs": {
+    "app": {
+      "remember": {
+        "text": "conformance app memory",
+        "area": "${area0}"
+      }
+    }
+  },
+  "dynamic": {
+    "engine": {
+      "resolveTools": [
+        "conformance_stub_read",
+        "conformance_stub_delete"
+      ]
+    }
+  }
 }

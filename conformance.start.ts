@@ -4,11 +4,36 @@
 import { defineApp, startApp, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { knowledgeDefinition, manifest } from "./src/app.ts";
 
+// Harness-only stub engine (conformance 0.1.12 `dynamic.<op>.resolveTools`): with TBCONF_STUB_ENGINE=1 two stub tools
+// resolve, so A11.resolve_family has something to resolve although no memory engine runs here. Only this file reads
+// the variable; test/harness-isolation.test.ts fails if any file under src/ does, so the stub is unreachable in the image.
+const STUB_TOOLS: Record<string, { crud: ("read" | "delete")[]; effect: "read" | "destructive"; holdFamily?: "destructive" }> = {
+  conformance_stub_read: { crud: ["read"], effect: "read" },
+  conformance_stub_delete: { crud: ["delete"], effect: "destructive", holdFamily: "destructive" },
+};
+
 const SETTINGS = { KNOWLEDGE_ENGINE: "gbrain", KNOWLEDGE_RESEARCH: "false", KNOWLEDGE_MODEL_PROVIDER: "openai" };
 
 export default async function start(env: Record<string, string>): Promise<{ url: string; stop(): Promise<void>; backupNow(): Promise<void> }> {
   const full = { ...SETTINGS, ...env };
-  const { definition, knowledge } = knowledgeDefinition(full, TbError);
+  const { definition: base, knowledge } = knowledgeDefinition(full, TbError);
+  const engine = base.dynamic?.engine;
+  const definition =
+    (env.TBCONF_STUB_ENGINE ?? process.env.TBCONF_STUB_ENGINE) === "1" && engine
+      ? {
+          ...base,
+          dynamic: {
+            ...base.dynamic,
+            engine: {
+              ...engine,
+              resolve: async (tool: string, ctx: Parameters<typeof engine.resolve>[1]) => {
+                const stub = STUB_TOOLS[tool];
+                return stub ? { tool, ...stub } : engine.resolve(tool, ctx);
+              },
+            },
+          },
+        }
+      : base;
   // Test roots (C63; suite default since spec 0.1.12): the suite passes TEST Portal Root Keys in TBCONF_PORTAL_ROOT_KEYS;
   // only this harness reads it and hands them to startApp. Production never reads that variable.
   const harness = env.TBCONF_PORTAL_ROOT_KEYS ? ({ portalRootKeys: JSON.parse(env.TBCONF_PORTAL_ROOT_KEYS) } as Parameters<typeof startApp>[2]) : undefined;
