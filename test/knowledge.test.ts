@@ -176,7 +176,13 @@ test("after a restore every live document is re-projected (engine state may diff
 test("QA S2: recall uses GBrain when it is up (not degraded) and engine client credentials use valid SDK secret names", async () => {
   const names: string[] = [];
   const strict = memorySecrets();
-  const secrets = { ...strict, put: async (name: string, value: string) => (names.push(name), strict.put(name, value)) };
+  const secrets = {
+    ...strict,
+    put: async (name: string, value: string) => {
+      names.push(name);
+      await strict.put(name, value);
+    },
+  };
   const { ctx, run, knowledge } = await setup();
   const withSecrets = (agent: string) => ctx(agent, { secrets } as never);
   const saved = await run("remember", { text: "GBrain path check: the quokka report" }, withSecrets(ADA));
