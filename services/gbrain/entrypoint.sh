@@ -1,8 +1,9 @@
 #!/bin/sh
-# Upstream-only provisioning (init, migrations) through GBrain's own trusted CLI, then `gbrain serve --http`.
+# Composes GBrain's env, then hands over to boot.ts (C69): init + migrations under a crash-safe lock with a status
+# /health while they wait, then `gbrain serve --http`. boot.ts is exec'd so it receives every stop signal itself
+# (a `sh` parent died on SIGTERM and left upstream's apply-migrations lease behind: qa1, 2026-10-12).
 # Model keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY) arrive as env from tb-exec.
 set -eu
-gbrain() { bun run "$GBRAIN_ROOT/src/cli.ts" "$@"; }
 
 : "${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:?required}"
 : "${GBRAIN_DB_HOST:?required}"
@@ -18,13 +19,4 @@ esac
 export GBRAIN_CHAT_MODEL="$chat" GBRAIN_MODEL="$chat" GBRAIN_EXPANSION_MODEL="$chat"
 export GBRAIN_EMBEDDING_MODEL="$emb" GBRAIN_EMBEDDING_DIMENSIONS="$dims"
 
-if [ ! -f "$GBRAIN_HOME/.gbrain/config.json" ]; then
-  gbrain init --non-interactive --embedding-model "$emb" --embedding-dimensions "$dims"
-fi
-gbrain apply-migrations --yes --no-autopilot-install
-
-# Private-network shape from upstream docs/mcp/DEPLOY.md ("Plain HTTP"): no --public-url, so the OAuth issuer stays
-# the default http://localhost:<port> (the MCP SDK refuses a non-HTTPS issuer on any other host). Knowledge's
-# client_credentials tokens are bound to that default resource and verified without reading the request host.
-exec bun run "$GBRAIN_ROOT/src/cli.ts" serve --http --bind "${GBRAIN_BIND:-::}" --port "${PORT:-3131}" \
-  --suppress-bootstrap-token --fail-fast
+exec node /opt/knowledge/boot.ts

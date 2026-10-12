@@ -1,0 +1,9 @@
+{
+  "name": "knowledge-gbrain-boot",
+  "private": true,
+  "type": "module",
+  "description": "C69: runtime dependency of the GBrain companion's boot supervisor (boot.ts), installed into /opt/knowledge with `npm ci --ignore-scripts` from the integrity-pinned package-lock.json next to this file.",
+  "dependencies": {
+    "postgres": "3.4.9"
+  }
+}
