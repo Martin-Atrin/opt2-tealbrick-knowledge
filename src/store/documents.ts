@@ -5,7 +5,7 @@
 import { opaqueDigest } from "@opt2-tealbrick/manifest";
 import type { Db } from "@opt2-tealbrick/spec/sdk";
 import { newId, slugify } from "../ids.ts";
-import { normalizeTag, type TagFilter } from "../narrowing.ts";
+import { normalizeTag, type TagFilter, tagsPass } from "../narrowing.ts";
 
 export type DocumentStatus = "draft" | "published" | "archived";
 
@@ -99,18 +99,19 @@ function cleanTags(tags: readonly string[] | undefined): string[] {
   return [...new Set(tags.map(normalizeTag).filter(Boolean))].slice(0, 20);
 }
 
-/** SQL condition (G5 narrowing) on a document row alias: tags intersect `anyOf` and miss `noneOf`. Stored tags are normalized. */
+/**
+ * SQL PRE-filter (G5 narrowing) so LIMITs count passing rows: only non-empty lists, which select exactly what the shared
+ * `tagsMatch` keeps (stored tags and filter lists are both `normalizeTag`-ed). Every caller still applies `tagsPass`
+ * (= tagsMatch) to the rows, so the shared function alone decides, e.g. what an empty `anyOf` means.
+ */
 function tagCondition(filter: TagFilter | null | undefined, alias = "d"): { sql: string; params: string[] } {
   if (!filter) return { sql: "", params: [] };
   let sql = "";
   const params: string[] = [];
   const marks = (list: readonly string[]) => list.map(() => "?").join(", ");
-  if (filter.anyOf) {
-    if (!filter.anyOf.length) sql += " AND 0";
-    else {
-      sql += ` AND EXISTS (SELECT 1 FROM json_each(${alias}.tags) t WHERE t.value IN (${marks(filter.anyOf)}))`;
-      params.push(...filter.anyOf);
-    }
+  if (filter.anyOf?.length) {
+    sql += ` AND EXISTS (SELECT 1 FROM json_each(${alias}.tags) t WHERE t.value IN (${marks(filter.anyOf)}))`;
+    params.push(...filter.anyOf);
   }
   if (filter.noneOf?.length) {
     sql += ` AND NOT EXISTS (SELECT 1 FROM json_each(${alias}.tags) t WHERE t.value IN (${marks(filter.noneOf)}))`;
@@ -201,14 +202,19 @@ export class DocumentStore {
 
   /** Collections of an area; `documentCount` counts only documents that pass `tags` (G5 narrowing) when given. */
   listCollections(area: string, tags?: TagFilter | null): (Collection & { documentCount: number })[] {
-    const cond = tagCondition(tags);
-    return this.db
+    const collections = this.db
       .prepare(
-        `SELECT c.*, (SELECT COUNT(*) FROM kn_documents d WHERE d.collection_id = c.id AND d.deleted_at IS NULL${cond.sql}) AS document_count
+        `SELECT c.*, (SELECT COUNT(*) FROM kn_documents d WHERE d.collection_id = c.id AND d.deleted_at IS NULL) AS document_count
          FROM kn_collections c WHERE c.area_id = ? AND c.deleted_at IS NULL ORDER BY c.is_default DESC, c.name`,
       )
-      .all(...cond.params, area)
+      .all(area)
       .map((row) => ({ ...toCollection(row), documentCount: num(row.document_count) }));
+    if (!tags) return collections;
+    const counts = new Map<string, number>();
+    for (const row of this.db.prepare("SELECT collection_id, tags FROM kn_documents WHERE area_id = ? AND deleted_at IS NULL").all(area)) {
+      if (tagsPass(JSON.parse(String(row.tags)) as string[], tags)) counts.set(String(row.collection_id), (counts.get(String(row.collection_id)) ?? 0) + 1);
+    }
+    return collections.map((collection) => ({ ...collection, documentCount: counts.get(collection.id) ?? 0 }));
   }
 
   /** Soft-deletes a non-default collection and every live document in it (each queued for engine removal). */
@@ -230,7 +236,8 @@ export class DocumentStore {
     const cond = tagCondition(tags);
     const rows = this.db
       .prepare(`SELECT id, parent_id, title, status, tags, updated_at FROM kn_documents d WHERE collection_id = ? AND deleted_at IS NULL${cond.sql} ORDER BY title COLLATE NOCASE, id`)
-      .all(collectionId, ...cond.params);
+      .all(collectionId, ...cond.params)
+      .filter((row) => tagsPass(JSON.parse(String(row.tags)) as string[], tags ?? null));
     const ids = new Set(rows.map((row) => String(row.id)));
     const byParent = new Map<string | null, TreeNode[]>();
     for (const row of rows) {
@@ -371,7 +378,8 @@ export class DocumentStore {
         tags: JSON.parse(String(row.tags)) as string[],
         createdBy: String(row.created_by),
         createdAt: num(row.created_at),
-      }));
+      }))
+      .filter((revision) => tagsPass(revision.tags, tags ?? null));
   }
 
   revision(id: string, version: number) {
@@ -450,11 +458,13 @@ export class DocumentStore {
     const outbound = this.db
       .prepare(`SELECT l.id, l.type, d.id AS doc_id, d.title, d.tags, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.target_id AND d.deleted_at IS NULL${cond.sql} WHERE l.source_id = ? ORDER BY l.created_at`)
       .all(...cond.params, documentId)
-      .map(map);
+      .map(map)
+      .filter((link) => tagsPass(link.tags, tags ?? null));
     const backlinks = this.db
       .prepare(`SELECT l.id, l.type, d.id AS doc_id, d.title, d.tags, d.updated_at FROM kn_links l JOIN kn_documents d ON d.id = l.source_id AND d.deleted_at IS NULL${cond.sql} WHERE l.target_id = ? ORDER BY l.created_at`)
       .all(...cond.params, documentId)
-      .map(map);
+      .map(map)
+      .filter((link) => tagsPass(link.tags, tags ?? null));
     return { outbound, backlinks };
   }
 
@@ -500,7 +510,8 @@ export class DocumentStore {
            WHERE d.deleted_at IS NULL AND d.area_id IN (${marks})${collectionFilter} ORDER BY d.updated_at DESC LIMIT ?`,
         )
         .all(...params, limit)
-        .map(hit);
+        .map(hit)
+        .filter((h) => tagsPass(h.tags, input.tags ?? null));
     }
     return this.db
       .prepare(
@@ -510,7 +521,8 @@ export class DocumentStore {
          ORDER BY rank LIMIT ?`,
       )
       .all(match, ...params, limit)
-      .map(hit);
+      .map(hit)
+      .filter((h) => tagsPass(h.tags, input.tags ?? null));
   }
 
   // ── projection outbox ──

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { documentIdFromSlug } from "../src/engines/gbrain/engine.ts";
 import { gbrainExposure } from "../src/engines/gbrain/exposure.ts";
 import { argumentRefusal } from "../src/engines/gbrain/guard.ts";
 import { neutralizeFenceMarkers, sanitizeResult, stripPrivacyFences } from "../src/engines/gbrain/privacy.ts";
@@ -66,4 +67,13 @@ test("SEC-10: guard refuses all_sources, include_private, purge and forced delet
   assert.ok(argumentRefusal("delete_page", { slug: "notes/a", force: true }));
   assert.ok(argumentRefusal("restore_page", { slug: "notes/a", force: true }));
   assert.equal(argumentRefusal("delete_page", { slug: "notes/a" }), null);
+});
+
+test("QA R4 S3: engine slugs come back lower case (upstream validateSlug); the canonical document id is restored", () => {
+  assert.equal(documentIdFromSlug("knowledge-docs/kdoc_01m4s13txsdybf72tx2yrb8e40"), "kdoc_01M4S13TXSDYBF72TX2YRB8E40");
+  assert.equal(documentIdFromSlug("knowledge-docs/kdoc_01M4S13TXSDYBF72TX2YRB8E40"), "kdoc_01M4S13TXSDYBF72TX2YRB8E40");
+  assert.equal(documentIdFromSlug("Knowledge-Docs/kdoc_01m4s13txsdybf72tx2yrb8e40"), "kdoc_01M4S13TXSDYBF72TX2YRB8E40");
+  assert.equal(documentIdFromSlug("notes/kdoc_01m4s13txsdybf72tx2yrb8e40"), null, "not a canonical page");
+  assert.equal(documentIdFromSlug("knowledge-docs/kdoc_01m4s13txsdybf72tx2yrb8e4"), null, "25 chars is not a ULID");
+  assert.equal(documentIdFromSlug("knowledge-docs/kdoc_01m4s13txsdybf72tx2yrb8eil"), null, "I and L are not Crockford base32");
 });

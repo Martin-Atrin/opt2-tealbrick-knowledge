@@ -192,7 +192,8 @@ export async function fakeGBrain(): Promise<FakeGBrain> {
       if (custom !== undefined) return reply({ content: [{ type: "text", text: JSON.stringify(custom) }] });
       const pages = state.pages.get(source) ?? new Map();
       state.pages.set(source, pages);
-      const slug = String(args.slug ?? "");
+      // Upstream validateSlug lower-cases every slug (gbrain src/core/utils.ts at the pin); the fake does the same.
+      const slug = String(args.slug ?? "").toLowerCase();
       if (name === "get_page") {
         const page = pages.get(slug);
         return page ? reply({ content: [{ type: "text", text: JSON.stringify({ slug, revision: page.revision, content: page.content }) }] }) : toolError("page_not_found");

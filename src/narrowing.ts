@@ -2,17 +2,15 @@
 // or recall returns to memories whose tags satisfy `memoryTags` (anyOf: at least one, noneOf: none). Only the app
 // whose product id is `rules` can write the `rules.` context namespace (the bridge namespaces context keys).
 // Narrowing never widens: an unknown version or a malformed value refuses the call (fail closed).
+import { normalizeTag, tagsMatch } from "@opt2-tealbrick/manifest";
 import type { Json } from "@opt2-tealbrick/spec/sdk";
+
+export { normalizeTag };
 
 export const NARROWING_KEY = "rules.narrowing";
 export const NARROWING_UNSUPPORTED = "narrowing_unsupported";
 
-/** One tag rule for the whole app: stored tags and narrowing tags compare after trim + lower case. */
-export function normalizeTag(tag: string): string {
-  return tag.trim().toLowerCase();
-}
-
-/** A tag filter after normalization; `anyOf: []` keeps nothing (no tag can intersect an empty list). */
+/** A tag filter (lists normalized with the shared `normalizeTag`); the comparison is the shared `tagsMatch` (SDK-API §18.1, L1). */
 export interface TagFilter {
   anyOf?: string[];
   noneOf?: string[];
@@ -53,20 +51,17 @@ export function readNarrowing(context: Readonly<Record<string, Json>> | null | u
   if (!isObject(raw)) throw new NarrowingError("rules.narrowing memoryTags is not an object");
   const anyOf = tagList(raw.anyOf, "anyOf");
   const noneOf = tagList(raw.noneOf, "noneOf");
-  if (anyOf === undefined && !noneOf?.length) return { v: 1, ruleId: value.ruleId, tags: null };
-  return { v: 1, ruleId: value.ruleId, tags: { ...(anyOf ? { anyOf } : {}), ...(noneOf?.length ? { noneOf } : {}) } };
+  // Lists are kept as sent (an empty anyOf included): what they mean is decided by the shared tagsMatch alone.
+  if (anyOf === undefined && noneOf === undefined) return { v: 1, ruleId: value.ruleId, tags: null };
+  return { v: 1, ruleId: value.ruleId, tags: { ...(anyOf ? { anyOf } : {}), ...(noneOf ? { noneOf } : {}) } };
 }
 
-/** Tags pass: at least one of `anyOf` (when given) and none of `noneOf`. Untagged items fail any `anyOf`. */
+/** THE G5 comparison: the manifest package's `tagsMatch` (Rules' after hook uses the same function). */
 export function tagsPass(tags: readonly string[], filter: TagFilter | null): boolean {
-  if (!filter) return true;
-  const own = new Set(tags.map(normalizeTag));
-  if (filter.anyOf && !filter.anyOf.some((tag) => own.has(tag))) return false;
-  if (filter.noneOf?.some((tag) => own.has(tag))) return false;
-  return true;
+  return tagsMatch(filter ?? undefined, tags);
 }
 
-/** Items without tags (research sources, notes, chats) pass only when no `anyOf` is given. */
+/** Items without tags (research sources, notes, chats): pass exactly when an item with no tags matches. */
 export function untaggedPass(filter: TagFilter | null): boolean {
-  return tagsPass([], filter);
+  return tagsMatch(filter ?? undefined, []);
 }

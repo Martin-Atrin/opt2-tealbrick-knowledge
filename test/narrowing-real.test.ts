@@ -83,6 +83,12 @@ test("L2 G5: a Rules narrowing {anyOf: [work]} reaches the real app and only wor
   assert.equal(hidden.status, 404);
   assert.equal(hidden.code, "not_found");
 
+  const nothing = await ok("recall", { query: "osprey", area: own }, narrowing({ anyOf: [] }));
+  assert.deepEqual(nothing.results, [], "anyOf [] (Rules: disjoint merged lists) = nothing passes (C115)");
+
+  const upper = await ok("recall", { query: "osprey", area: own }, narrowing({ anyOf: [" WORK "] }));
+  assert.deepEqual(upper.results.map((r: { documentId: string }) => r.documentId), [work], "tags compare after normalizeTag");
+
   const none = await ok("recall", { query: "osprey", area: own }, narrowing({ noneOf: ["personal"] }));
   assert.deepEqual(none.results.map((r: { documentId: string }) => r.documentId).sort(), [work, untagged].sort());
 });

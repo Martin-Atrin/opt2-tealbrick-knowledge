@@ -10,6 +10,17 @@ import { GBrainError } from "./transport.ts";
 
 export const PAGE_PREFIX = "knowledge-docs/";
 
+/**
+ * Canonical document id of an engine page slug, or null. Upstream GBrain lower-cases every slug (validateSlug at the
+ * pin), so `knowledge-docs/kdoc_<ULID>` comes back as `kdoc_<ulid>`; a ULID is case-insensitive (Crockford base32)
+ * and Knowledge writes it upper case, so the id is restored by upper-casing it (QA R4 S3: the tag join missed).
+ */
+export function documentIdFromSlug(slug: string): string | null {
+  if (!slug.toLowerCase().startsWith(PAGE_PREFIX)) return null;
+  const match = /^kdoc_([0-9a-hjkmnp-tv-z]{26})$/iu.exec(slug.slice(PAGE_PREFIX.length));
+  return match ? `kdoc_${(match[1] as string).toUpperCase()}` : null;
+}
+
 export interface RecallRow {
   area: string;
   documentId: string | null;
@@ -104,7 +115,7 @@ export class GBrainEngine {
         const slug = typeof row.slug === "string" ? row.slug : "";
         return {
           area,
-          documentId: slug.startsWith(PAGE_PREFIX) ? slug.slice(PAGE_PREFIX.length) : null,
+          documentId: documentIdFromSlug(slug),
           slug,
           title: typeof row.title === "string" ? row.title : slug,
           text: String(row.chunk_text ?? row.text ?? row.snippet ?? "").slice(0, 4000),
