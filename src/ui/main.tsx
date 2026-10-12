@@ -1,10 +1,9 @@
 // Knowledge person UI: Configure (who may read/write which memory area), indexing status, holds, keys.
-import { callOp, TbProvider, useAgents, useHolds, useScopes, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
-import { BrandMark, Button, Notice, Select, Tabs, Tag } from "@opt2-tealbrick/ui";
-import { useCallback, useEffect, useState } from "react";
+import { callOp, TbProvider, tbFetch, useAgents, useHolds, useScopes, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
+import { AppShell, BrandMark, Button, Notice, Select, STANDARD_PAGES, Tag } from "@opt2-tealbrick/ui";
+import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-type Tab = "configure" | "status" | "holds" | "keys";
 
 interface AreaStatus {
   id: string;
@@ -177,48 +176,119 @@ function Keys() {
   );
 }
 
+interface ReceiptRow {
+  id: string;
+  caller: { name: string };
+  op: string;
+  status: string;
+  summary: string;
+  createdAt: number;
+}
+
+function Receipts() {
+  const [items, setItems] = useState<ReceiptRow[]>([]);
+  useEffect(() => {
+    callOp<{ items: ReceiptRow[] }>("tb.receipts_list", {})
+      .then((r) => setItems(r.items))
+      .catch(() => setItems([]));
+  }, []);
+  if (!items.length) return <p className="kn-muted">No agent actions recorded yet.</p>;
+  return (
+    <table className="kn-table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Agent</th>
+          <th>Action</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item) => (
+          <tr key={item.id}>
+            <td>{new Date(item.createdAt).toLocaleString()}</td>
+            <td>{item.caller.name}</td>
+            <td>{item.summary || item.op}</td>
+            <td>
+              <Tag tone={item.status === "run" || item.status === "approved" ? "ok" : item.status === "held" ? "action" : "neutral"}>{item.status}</Tag>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+
+function Backups() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const download = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await tbFetch("tb/v1/ops/tb.export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input: {} }) });
+      const name = /filename="([^"]+)"/u.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "knowledge-export.tar.gz";
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "export failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <p className="kn-muted">Backups run every night inside your deployment (documents, memory engine and research databases). The export is a readable copy of your documents and agent receipts.</p>
+      {error ? <Notice tone="action" role="alert">{error}</Notice> : null}
+      <Button onClick={() => void download()} disabled={busy}>
+        {busy ? "Preparing…" : "Download a copy"}
+      </Button>
+    </div>
+  );
+}
+
+/** Own pages first, then the SDK standard pages; "Agents & scopes" is Knowledge's area access table. */
+const PAGES = [{ id: "status", label: "Memory status" }, ...STANDARD_PAGES];
+
+function initialPage(): string {
+  const rest = window.location.pathname.replace(/^\/a\/knowledge\/?/u, "");
+  if (rest.startsWith("configure")) return "agents";
+  return PAGES.some((page) => page.id === rest) ? rest : "agents";
+}
+
 function App() {
   const { status } = useSession();
-  const [tab, setTab] = useState<Tab>("configure");
+  const [page, setPage] = useState(initialPage);
   const { areas, error, reload } = useAreas();
+  const { holds } = useHolds({ status: "held" });
   if (status === "loading") return <p className="kn-muted">Loading…</p>;
   if (status === "signed_out") return <Notice tone="action">Your session ended. Open Knowledge again from the Portal canvas.</Notice>;
+  const pages = PAGES.map((p) => (p.id === "holds" ? { ...p, badge: holds.length || null } : p));
   return (
-    <>
-      <header className="kn-head">
-        <BrandMark size={24} />
-        <h1>Knowledge</h1>
-        <span className="kn-spacer" />
-      </header>
-      <Tabs<Tab>
-        label="Knowledge sections"
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: "configure", label: "Configure" },
-          { value: "status", label: "Memory status" },
-          { value: "holds", label: "Approvals" },
-          { value: "keys", label: "Keys" },
-        ]}
-      />
-      <section className="kn-section">
-        {error ? <Notice tone="action" role="alert">{error}</Notice> : null}
-        {tab === "configure" ? <Configure areas={areas} /> : null}
-        {tab === "status" ? <Status areas={areas} reload={reload} /> : null}
-        {tab === "holds" ? <Holds /> : null}
-        {tab === "keys" ? <Keys /> : null}
-      </section>
-    </>
+    <AppShell title="Knowledge" icon={<BrandMark size={22} />} pages={pages} current={page} onNavigate={setPage}>
+      {error ? <Notice tone="action" role="alert">{error}</Notice> : null}
+      {page === "agents" ? <Configure areas={areas} /> : null}
+      {page === "status" ? <Status areas={areas} reload={reload} /> : null}
+      {page === "holds" ? <Holds /> : null}
+      {page === "receipts" ? <Receipts /> : null}
+      {page === "keys" ? <Keys /> : null}
+      {page === "backups" ? <Backups /> : null}
+    </AppShell>
   );
 }
 
 const rootElement = document.getElementById("root");
 if (rootElement) {
   createRoot(rootElement).render(
-    <TbProvider product="knowledge">
-      <div className="kn-shell">
+    <StrictMode>
+      <TbProvider product="knowledge">
         <App />
-      </div>
-    </TbProvider>,
+      </TbProvider>
+    </StrictMode>,
   );
 }

@@ -1,7 +1,12 @@
-node_modules
 .git
-test
+.woodpecker
 .tb-ci
-*.md
-!skills/**/SKILL.md
+.data
+.conformance
+node_modules
 dist
+gen
+test
+*.tgz
+.env
+.env.*

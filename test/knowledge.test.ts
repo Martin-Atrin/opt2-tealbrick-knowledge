@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import { knowledgeDefinition } from "../src/app.ts";
+import { memorySecrets } from "../src/knowledge.ts";
 import { context, type FakeGBrain, FakeScopes, fakeGBrain, memoryDb, TestError } from "./helpers.ts";
 
 const ADA = "agt_01AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -122,7 +123,7 @@ test("engine tools: catalog filters policy exclusions and source_id; calls are a
   await run("recall", { query: "warm up" }, ctx(ADA)); // provisions the sources
   const dynamic = definition.dynamic?.engine;
   assert.ok(dynamic);
-  const hookCtx = { db: ctx(ADA).db, log: ctx(ADA).log, getKey: async () => null, signal: new AbortController().signal };
+  const hookCtx = { db: ctx(ADA).db, log: ctx(ADA).log, getKey: async () => null, signal: new AbortController().signal, secrets: memorySecrets() };
   const catalog = await dynamic.catalog(null, hookCtx);
   const names = catalog.map((entry) => entry.name);
   assert.ok(names.includes("gb_remember"));

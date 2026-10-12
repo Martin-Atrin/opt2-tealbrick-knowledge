@@ -1,23 +1,28 @@
-# Teal Brick Knowledge app service (TypeScript run directly by Node 24 type stripping).
-FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS ui
-WORKDIR /build
-COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Knowledge app image (SDK-API §15 template pattern, C53): tsc build to dist, pnpm, manifest at /opt/tb.
+# Base pinned by digest: node:24-slim (multi-arch index digest). Bump the tag and the digest together.
+
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS build
+WORKDIR /app
+ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.json tsconfig.build.json ./
 COPY scripts ./scripts
 COPY src ./src
-RUN npm run build
+RUN pnpm run build && pnpm prune --prod
 
-FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
-COPY tealbrick.manifest.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json tealbrick.manifest.json ./
 COPY migrations ./migrations
-COPY skills ./skills
-COPY src ./src
-COPY --from=ui /build/dist/ui ./dist/ui
+# Standard manifest location in every opt2 image (tb-exec default --manifest path).
+COPY tealbrick.manifest.json /opt/tb/tealbrick.manifest.json
+# Data volume mount point (manifest runtime.volumes "data"); TB_DATA_DIR=/data, TB_BACKUP_DIR=/data/backup (C28).
+RUN mkdir -p /data/backup && chown -R node:node /data
+USER node
 EXPOSE 5310
-# Railway runs volume services as root (C38, RAILWAY_RUN_UID=0); src/main.ts takes ownership of the
-# volume mounts and drops to uid 1000.
-CMD ["node", "src/main.ts"]
+CMD ["node", "dist/main.js"]

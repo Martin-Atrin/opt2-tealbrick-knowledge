@@ -1,8 +1,8 @@
 // Which upstream GBrain operations agents may call, with their CRUD class and effect.
 // Source: the pinned operation surface (generated from upstream's registry at the tag) intersected
 // with the live `tools/list` of the running service. An op must be in both; anything else fails closed.
-import { readFileSync } from "node:fs";
 import type { CrudAction, DynamicCatalogEntry, Effect, HoldFamily } from "@opt2-tealbrick/spec/manifest";
+import surfaceData from "./surface-0.60.57.0.json" with { type: "json" };
 
 interface UpstreamOperation {
   name: string;
@@ -82,7 +82,7 @@ let cached: Exposure | null = null;
 
 export function gbrainExposure(): Exposure {
   if (cached) return cached;
-  const surface = JSON.parse(readFileSync(new URL("./surface-0.60.57.0.json", import.meta.url), "utf8")) as Surface;
+  const surface = surfaceData as Surface;
   const exposed = new Map<string, ExposedOperation>();
   const excluded = new Map<string, string>();
   for (const op of surface.operations) {

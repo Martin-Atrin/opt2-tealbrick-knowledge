@@ -34,3 +34,5 @@ secrets/
 # opt2 CI runner scratch
 .tb-ci/
 .conformance/
+gen/
+.data/

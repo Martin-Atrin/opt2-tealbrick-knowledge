@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import type { CrudAction } from "@opt2-tealbrick/spec/manifest";
 import type { Caller, Db, OpContext, ScopeStore } from "@opt2-tealbrick/spec/sdk";
+import { memorySecrets } from "../src/knowledge.ts";
 
 export function memoryDb(): Db {
   const raw = new DatabaseSync(":memory:");
@@ -111,6 +112,10 @@ export function context(db: Db, scopes: FakeScopes, agentId: string, extra: Part
     db,
     log: { debug: noop, info: noop, warn: noop, error: noop },
     signal: new AbortController().signal,
+    publicUrl: null,
+    workspace: "ws_01TESTWORKSPACE0000000000000" as `ws_${string}`,
+    scopes: scopes.asStore(),
+    secrets: memorySecrets(),
     ...extra,
   };
 }

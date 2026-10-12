@@ -1,29 +1,18 @@
 {
   "compilerOptions": {
     "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "resolveJsonModule": true,
     "skipLibCheck": true,
-    "types": [
-      "node"
-    ],
-    "jsx": "react-jsx",
-    "lib": [
-      "es2024",
-      "dom",
-      "dom.iterable"
-    ]
+    "resolveJsonModule": true,
+    "types": ["node"]
   },
-  "include": [
-    "src",
-    "test",
-    "scripts",
-    "conformance.start.ts"
-  ]
+  "include": ["src", "test", "scripts", "conformance.start.ts"]
 }

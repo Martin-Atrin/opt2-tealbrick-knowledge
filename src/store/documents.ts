@@ -2,7 +2,7 @@
 // Authorization happens in the handlers (SDK scope access per area); this module enforces data integrity:
 // parents in the same collection without cycles, links inside one area, optimistic concurrency, soft delete.
 // Every change to a document writes its projection outbox row in the same transaction.
-import { createHash } from "node:crypto";
+import { opaqueDigest } from "@opt2-tealbrick/manifest";
 import type { Db } from "@opt2-tealbrick/spec/sdk";
 import { newId, slugify } from "../ids.ts";
 
@@ -110,7 +110,8 @@ export function documentMarkdown(doc: Document): string {
   ].join("\n");
 }
 
-export const contentHash = (markdown: string) => createHash("sha256").update(markdown).digest("hex");
+/** Change detection for projection: the manifest package's raw-string digest (`sha256:<hex>`). */
+export const contentHash = (markdown: string) => opaqueDigest(markdown);
 
 /** FTS5 query from free text: every token quoted (no operator injection), OR-joined, prefix match on the last token. */
 export function ftsQuery(text: string): string | null {

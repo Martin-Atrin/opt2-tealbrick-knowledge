@@ -1,13 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
+import { ulid } from "@opt2-tealbrick/manifest";
 
-const ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
-
-/** `<prefix>_` + 20 lower-case base32 characters from the CSPRNG (never sequential: ids leak nothing). */
+/** `<prefix>_<ULID>` (CORE §1 format; the manifest package's one ULID generator, 80 random bits per id). */
 export function newId(prefix: "kcol" | "kdoc" | "krev" | "kcom" | "klnk"): string {
-  const bytes = randomBytes(20);
-  let out = "";
-  for (const byte of bytes) out += ALPHABET[byte & 31];
-  return `${prefix}_${out}`;
+  return `${prefix}_${ulid()}`;
 }
 
 /** The shared company area. */
@@ -20,7 +16,7 @@ export function agentAreaId(agentId: string): string {
   return `agent-${ulid}`;
 }
 
-/** GBrain source id of an area (≤ 32 chars, upstream grammar): `ka-` + 24 hex of sha256(area id). */
+/** GBrain source id of an area (≤ 32 chars, upstream engine grammar, so not a manifest helper): `ka-` + 24 hex of sha256(area id). */
 export function areaSourceId(areaId: string): string {
   return `ka-${createHash("sha256").update(areaId).digest("hex").slice(0, 24)}`;
 }
