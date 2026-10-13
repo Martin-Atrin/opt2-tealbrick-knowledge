@@ -10,6 +10,17 @@
       }
     },
     {
+      "id": "agent_a_tagged_memory",
+      "as": "agentA",
+      "op": "remember",
+      "input": {
+        "text": "narrowingprobe a tagged memory for the narrowing check",
+        "tags": [
+          "work"
+        ]
+      }
+    },
+    {
       "id": "app_area_grant",
       "as": "owner",
       "op": "tb.scopes_set",
@@ -36,5 +47,12 @@
         "conformance_stub_delete"
       ]
     }
+  },
+  "narrowing": {
+    "op": "documents_search",
+    "input": {
+      "query": "narrowingprobe"
+    },
+    "tag": "work"
   }
 }
