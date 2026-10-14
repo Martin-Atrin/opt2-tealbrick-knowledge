@@ -55,11 +55,31 @@ class SecretClientStore implements ClientStore {
   }
 }
 
+/** What the memory engine last showed (QA F89, L3): recall answers and a periodic probe update it. */
+export interface EngineHealth {
+  /** unknown: nothing seen yet; ok: full recall; degraded: upstream ran part of its pipeline only; failing: answers fail */
+  state: "unknown" | "ok" | "degraded" | "failing";
+  /** degraded stages (`stage[:reason]`, upstream closed vocabularies) or Knowledge error codes; never raw upstream text */
+  detail: string[];
+  at: number;
+}
+
+/** SDK-API (spec 0.1.28) `AppAttention`: app-reported condition for the owner (status push → Portal). */
+export interface Attention {
+  code: string;
+  reason: string;
+}
+
+/** Engine probe interval: one cheap one-row query on the company area (embeds a 4-word query when embeddings work). */
+export const ENGINE_PROBE_MS = 10 * 60_000;
+
 export interface KnowledgeOptions {
   fetch?: typeof fetch;
   now?: () => number;
   /** projection drain interval; 0 disables the timer (tests drive drains explicitly) */
   drainIntervalMs?: number;
+  /** engine probe interval (default ENGINE_PROBE_MS); 0 probes once at start only */
+  engineProbeMs?: number;
 }
 
 export class Knowledge {
@@ -69,6 +89,9 @@ export class Knowledge {
   private timer: ReturnType<typeof setInterval> | null = null;
   private provisioning: Promise<void> | null = null;
   private secrets: AppSecrets = memorySecrets();
+  private engineHealth: EngineHealth = { state: "unknown", detail: [], at: 0 };
+  private statusChanged: (() => void) | null = null;
+  private probeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: KnowledgeConfig, opts: KnowledgeOptions = {}) {
     this.config = config;
@@ -114,6 +137,66 @@ export class Knowledge {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.probeTimer) clearInterval(this.probeTimer);
+    this.probeTimer = null;
+  }
+
+  /** Record what the engine just showed; a change pushes the app status at once (SDK `statusChanged`). */
+  noteEngine(next: { state: EngineHealth["state"]; detail: string[] } | null): void {
+    if (!next) return;
+    const detail = [...new Set(next.detail)].sort();
+    const changed = next.state !== this.engineHealth.state || detail.join(",") !== this.engineHealth.detail.join(",");
+    this.engineHealth = { state: next.state, detail, at: (this.opts.now ?? Date.now)() };
+    if (changed) this.statusChanged?.();
+  }
+
+  engineStatus(): EngineHealth {
+    return { ...this.engineHealth, detail: [...this.engineHealth.detail] };
+  }
+
+  /**
+   * The condition the owner must see (spec 0.1.28 `defineApp({attention})`), or null. The app keeps serving (recall
+   * falls back to keyword search), so this is an attention, not a failure.
+   */
+  attention(): Attention | null {
+    if (this.config.engine !== "gbrain") return null;
+    const { state, detail } = this.engineHealth;
+    const list = detail.join(", ").slice(0, 80);
+    if (state === "degraded") {
+      const embeddings = detail.some((d) => d.startsWith("embed") || d.startsWith("keyword_only") || d.includes("no_provider") || d.includes("provider_error") || d.includes("no_key"));
+      return {
+        code: "memory_engine_degraded",
+        reason: (embeddings
+          ? `Memory engine runs without embeddings (${list}): recall is keyword-only. Check the engine's embedding provider key.`
+          : `Memory engine runs degraded (${list}): recall adds keyword search.`).slice(0, 200),
+      };
+    }
+    if (state === "failing") return { code: "memory_engine_failing", reason: `Memory engine answers fail (${list}): recall uses keyword search only.`.slice(0, 200) };
+    return null;
+  }
+
+  /** One engine probe on the company area (no agent principal): a one-row query, recorded with `noteEngine`. */
+  async probeEngine(services: Services): Promise<void> {
+    const engine = services.engine;
+    const area = services.areas.get(SHARED_AREA_ID);
+    if (!engine || !area?.sourceReady) return;
+    try {
+      const { degraded } = await engine.recall(area.id, area.sourceId, "knowledge engine status check", 1);
+      this.noteEngine(degraded.length ? { state: "degraded", detail: degraded } : { state: "ok", detail: [] });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code).slice(0, 64) : "engine_error";
+      this.noteEngine({ state: "failing", detail: [code] });
+    }
+  }
+
+  /** Probe now and every ENGINE_PROBE_MS; `statusChanged` pushes the app status when the engine state changes. */
+  watchEngine(services: Services, statusChanged: (() => void) | null, intervalMs = ENGINE_PROBE_MS): Promise<void> {
+    this.statusChanged = statusChanged;
+    if (services.engine && intervalMs > 0 && !this.probeTimer) {
+      this.probeTimer = setInterval(() => void this.probeEngine(this.services ?? services).catch(() => undefined), intervalMs);
+      this.probeTimer.unref();
+    }
+    return this.probeEngine(services);
   }
 
   /** Kick the projection outbox without waiting (called after every document write). */

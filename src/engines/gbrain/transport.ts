@@ -42,7 +42,84 @@ function firstText(result: Record<string, unknown>): string | undefined {
   return isRecord(first) && typeof first.text === "string" ? first.text : undefined;
 }
 
-function resultData(message: unknown, id: string): unknown {
+/** A GBrain notice (upstream 0.60.57.0 `_meta.gbrain_notices[]` and `[gbrain notice <code> kind=<kind>]` text blocks). */
+export interface GBrainNotice {
+  code: string;
+  kind: string;
+}
+
+/** A degraded retrieval stage (`_meta.retrieval.degraded[]`; closed upstream vocabularies, never raw error text). */
+export interface DegradedStage {
+  stage: string;
+  reason: string | null;
+}
+
+/** A parsed tool answer: the ONE result item plus what upstream said about how it was produced. */
+export interface ToolAnswer {
+  data: unknown;
+  notices: GBrainNotice[];
+  /** recall-affecting degraded stages (upstream's ranking-only `reranker_skipped` is left out) */
+  degraded: DegradedStage[];
+}
+
+const NOTICE_BLOCK = /^\[gbrain notice ([a-z0-9_]{1,64}) kind=([a-z_]{1,32})\]/u;
+const VOCAB = /^[a-z0-9_]{1,64}$/u;
+/** Upstream RANKING_ONLY_DEGRADED_STAGES at the pin: the result set is complete, only its order differs. */
+const RANKING_ONLY = new Set(["reranker_skipped"]);
+
+function noticesOf(result: Record<string, unknown>, blocks: string[]): GBrainNotice[] {
+  const out = new Map<string, GBrainNotice>();
+  const meta = isRecord(result._meta) ? result._meta : null;
+  for (const item of Array.isArray(meta?.gbrain_notices) ? meta.gbrain_notices : []) {
+    if (isRecord(item) && typeof item.code === "string" && VOCAB.test(item.code)) out.set(item.code, { code: item.code, kind: typeof item.kind === "string" && VOCAB.test(item.kind) ? item.kind : "info" });
+  }
+  for (const block of blocks) {
+    const match = NOTICE_BLOCK.exec(block);
+    if (match && !out.has(match[1] as string)) out.set(match[1] as string, { code: match[1] as string, kind: match[2] as string });
+  }
+  return [...out.values()];
+}
+
+function degradedOf(result: Record<string, unknown>): DegradedStage[] {
+  const meta = isRecord(result._meta) ? result._meta : null;
+  const retrieval = isRecord(meta?.retrieval) ? meta.retrieval : null;
+  const list = Array.isArray(retrieval?.degraded) ? retrieval.degraded : [];
+  return list.flatMap((item): DegradedStage[] => {
+    const stage = typeof item === "string" ? item : isRecord(item) && typeof item.stage === "string" ? item.stage : null;
+    if (!stage || !VOCAB.test(stage) || RANKING_ONLY.has(stage)) return [];
+    const reason = isRecord(item) && typeof item.reason === "string" && VOCAB.test(item.reason) ? item.reason : null;
+    return [{ stage, reason }];
+  });
+}
+
+/**
+ * The result item, picked by SHAPE, never by position (QA F88): upstream puts the result JSON first and may add notice
+ * blocks (`[gbrain notice …]`) and plain evidence blocks after it. Exactly one text item that parses as a JSON object or
+ * array is the result; two are ambiguous and refused; with none, the plain text is the result (a string: a caller that
+ * expects rows treats it as unparsable, falls back and says so, L3); notice blocks are never the result.
+ */
+function pickResult(texts: string[]): unknown {
+  const blocks = texts.filter((text) => !NOTICE_BLOCK.test(text));
+  const parsed = blocks.flatMap((text) => {
+    try {
+      const value: unknown = JSON.parse(text);
+      return value !== null && typeof value === "object" ? [value] : [];
+    } catch {
+      return [];
+    }
+  });
+  if (parsed.length === 1) return parsed[0];
+  if (parsed.length > 1) throw new GBrainError("protocol", "GBrain answer carries more than one result item");
+  if (!blocks.length) throw new GBrainError("protocol", "GBrain answer has no result item");
+  if (blocks.length > 1) return blocks.join("\n\n");
+  try {
+    return JSON.parse(blocks[0] as string);
+  } catch {
+    return blocks[0];
+  }
+}
+
+function resultData(message: unknown, id: string): ToolAnswer {
   if (!isRecord(message) || message.jsonrpc !== "2.0" || message.id !== id) throw new GBrainError("protocol", "invalid or mismatched GBrain MCP response");
   if ("error" in message) throw new GBrainError("protocol", "GBrain MCP protocol error");
   const result = message.result;
@@ -58,22 +135,17 @@ function resultData(message: unknown, id: string): unknown {
     const safe = typeof code === "string" && SAFE_TOOL_ERRORS.has(code) ? code : null;
     throw new GBrainError("tool", `GBrain tool execution failed${safe ? `: ${safe}` : ""}`, { code: safe });
   }
+  const text = Array.isArray(result.content) ? result.content.filter((item): item is Record<string, unknown> => isRecord(item) && item.type === "text") : [];
+  if (text.some((item) => typeof item.text !== "string")) throw new GBrainError("protocol", "invalid GBrain text content");
+  const texts = text.map((item) => item.text as string);
+  const notices = noticesOf(result, texts);
+  const degraded = degradedOf(result);
   if ("structuredContent" in result) {
     if (!isRecord(result.structuredContent)) throw new GBrainError("protocol", "invalid GBrain structured content");
-    return result.structuredContent;
+    return { data: result.structuredContent, notices, degraded };
   }
   if (!Array.isArray(result.content)) throw new GBrainError("protocol", "missing GBrain tool content");
-  const text = result.content.filter((item): item is Record<string, unknown> => isRecord(item) && item.type === "text");
-  if (text.some((item) => typeof item.text !== "string")) throw new GBrainError("protocol", "invalid GBrain text content");
-  if (text.length === 1) {
-    const only = text[0]?.text as string;
-    try {
-      return JSON.parse(only);
-    } catch {
-      return only;
-    }
-  }
-  return result;
+  return { data: pickResult(texts), notices, degraded };
 }
 
 async function rpc(baseUrl: string, token: string, body: Record<string, unknown>, timeoutMs: number, fetcher: typeof fetch): Promise<{ text: string; sse: boolean }> {
@@ -149,12 +221,18 @@ export interface TransportOptions {
   fetch?: typeof fetch;
 }
 
-export async function callTool(opts: TransportOptions & { name: string; args: Record<string, unknown> }): Promise<unknown> {
+/** One tool call; the parsed result item with upstream's notices and degraded stages. */
+export async function callToolAnswer(opts: TransportOptions & { name: string; args: Record<string, unknown> }): Promise<ToolAnswer> {
   const id = randomUUID();
   const { text, sse } = await rpc(opts.baseUrl, opts.token, { jsonrpc: "2.0", id, method: "tools/call", params: { name: opts.name, arguments: opts.args } }, opts.timeoutMs ?? 30_000, opts.fetch ?? fetch);
   const message = sse ? sseResult(text, id) : parseEnvelope(text);
   if (message === undefined) throw new GBrainError("protocol", "GBrain MCP stream ended without a result");
   return resultData(message, id);
+}
+
+/** One tool call; the parsed result item only. */
+export async function callTool(opts: TransportOptions & { name: string; args: Record<string, unknown> }): Promise<unknown> {
+  return (await callToolAnswer(opts)).data;
 }
 
 export async function listTools(opts: TransportOptions): Promise<Record<string, unknown>[]> {

@@ -94,7 +94,8 @@ function toDocument(row: Row): Document {
   };
 }
 
-function cleanTags(tags: readonly string[] | undefined): string[] {
+/** THE stored tag list of a write (normalised, unique, ≤ 20): G5 write checks (§18.4 b) predict the result with it. */
+export function cleanTags(tags: readonly string[] | undefined): string[] {
   if (!tags) return [];
   return [...new Set(tags.map(normalizeTag).filter(Boolean))].slice(0, 20);
 }
@@ -288,6 +289,8 @@ export class DocumentStore {
     status?: DocumentStatus;
     tags?: string[];
     actor: string;
+    /** G5 (SDK-API §18.4 a): a parent the caller's narrowing hides answers exactly like a missing one */
+    hidden?: (doc: Document) => boolean;
   }): Document {
     const title = input.title.trim();
     if (!title) throw new StoreError("title_required", "title must not be empty", 400);
@@ -297,7 +300,7 @@ export class DocumentStore {
       if (!collection || collection.area !== input.area) throw notFound("collection");
       if (input.parentId) {
         const parent = this.getDocument(input.parentId);
-        if (!parent || parent.collectionId !== collection.id) throw new StoreError("parent_invalid", "parent must be a document in the same collection", 400);
+        if (!parent || parent.collectionId !== collection.id || input.hidden?.(parent)) throw new StoreError("parent_invalid", "parent must be a document in the same collection", 400);
       }
       const at = this.now();
       const id = newId("kdoc");
@@ -427,13 +430,14 @@ export class DocumentStore {
 
   // ── links ──
 
-  addLink(sourceId: string, targetId: string, type: string, actor: string): { id: string } {
+  /** `hidden` (G5, SDK-API §18.4 a): a target the caller's narrowing hides answers exactly like a missing one. */
+  addLink(sourceId: string, targetId: string, type: string, actor: string, hidden?: (doc: Document) => boolean): { id: string } {
     if (sourceId === targetId) throw new StoreError("link_invalid", "a document cannot link to itself", 400);
     const source = this.getDocument(sourceId);
     const target = this.getDocument(targetId);
     if (!source) throw notFound("document");
     // A target in another area answers like a missing one.
-    if (!target || target.area !== source.area) throw notFound("link_target");
+    if (!target || target.area !== source.area || hidden?.(target)) throw notFound("link_target");
     const existing = this.db.prepare("SELECT id FROM kn_links WHERE source_id = ? AND target_id = ? AND type = ?").get(sourceId, targetId, type);
     if (existing) return { id: String(existing.id) };
     const id = newId("klnk");

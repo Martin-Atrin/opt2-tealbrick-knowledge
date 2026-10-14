@@ -9,6 +9,8 @@ export { normalizeTag };
 
 export const NARROWING_KEY = "rules.narrowing";
 export const NARROWING_UNSUPPORTED = "narrowing_unsupported";
+/** SDK-API §18.4 b (C150): a write whose result the caller could not read (409, not retryable). */
+export const NARROWING_VIOLATION = "narrowing_violation";
 
 /** A tag filter (lists normalized with the shared `normalizeTag`); the comparison is the shared `tagsMatch` (SDK-API §18.1, L1). */
 export interface TagFilter {

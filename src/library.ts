@@ -44,6 +44,8 @@ export function createLibraryHandlers(d: LibraryDeps): Record<string, HandlerSpe
           const s = services(ctx);
           const counts = s.store.countsByArea();
           return json({
+            // QA F89: the owner sees a degraded or failing memory engine in the app too (not only in Portal).
+            engine: { ...knowledge.engineStatus(), attention: knowledge.attention() },
             areas: s.areas.list().map((a) => ({
               id: a.id,
               label: a.label,

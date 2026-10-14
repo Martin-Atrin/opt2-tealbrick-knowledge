@@ -13,8 +13,8 @@ import { agentAreaId } from "./ids.ts";
 import type { AppSecrets, Knowledge, Services } from "./knowledge.ts";
 import { createLibraryHandlers } from "./library.ts";
 import { fanOut, mergeRanked } from "./merge.ts";
-import { NARROWING_UNSUPPORTED, type Narrowing, NarrowingError, readNarrowing, type TagFilter, tagsPass, untaggedPass } from "./narrowing.ts";
-import { StoreError } from "./store/documents.ts";
+import { NARROWING_UNSUPPORTED, NARROWING_VIOLATION, type Narrowing, NarrowingError, readNarrowing, type TagFilter, tagsPass, untaggedPass } from "./narrowing.ts";
+import { cleanTags, StoreError } from "./store/documents.ts";
 
 /** The SDK's error class (CORE §8 envelope); injected so this module only depends on frozen types. */
 export type ErrorFactory = new (code: string, message: string, httpStatus?: number) => Error;
@@ -32,12 +32,15 @@ const FAN_OUT_LIMIT = 4;
 
 /**
  * G5 `rules.narrowing` per op (SDK-API §18). `items`: the handler keeps only items whose tags pass and returns `tags[]`
- * on each item (so a Rules after hook can redact too). `untagged`: the items carry no tags (research notebooks), so
- * only a narrowing without `anyOf` lets the call run. `none`: the output holds no memory items. Any other READ op
- * (person library views, engine tools) refuses a tag narrowing with `narrowing_unsupported` (fail closed).
- * Writes ignore the narrowing (it narrows what a call returns); research_ask is listed because it answers from notebook content.
+ * on each item (so a Rules after hook can redact too); for a WRITE (§18.4, C150) the handler treats a hidden item like
+ * a missing one and refuses a result the caller could not read (`narrowing_violation`). `untagged`: the items carry no
+ * tags (research notebooks), so only a narrowing without `anyOf` lets the call run (reads and writes alike). `none`:
+ * the call neither returns nor touches a tagged item. Every op NOT listed here (person library views and writes,
+ * collection-wide deletes, engine tools, any future op) refuses a tag narrowing with `narrowing_unsupported` (fail
+ * closed): a new op is narrowed only once someone decides how.
  */
-export const NARROWING_POLICY: Readonly<Record<string, "items" | "untagged" | "none" | "unsupported">> = {
+export const NARROWING_POLICY: Readonly<Record<string, "items" | "untagged" | "none">> = {
+  // reads
   recall: "items",
   documents_search: "items",
   document_get: "items",
@@ -56,7 +59,21 @@ export const NARROWING_POLICY: Readonly<Record<string, "items" | "untagged" | "n
   research_note_get: "untagged",
   research_chat_get: "untagged",
   research_context_get: "untagged",
+  // writes (§18.4 a/b: hidden item = missing item; a result outside the narrowing → narrowing_violation)
+  remember: "items",
+  document_create: "items",
+  document_update: "items",
+  document_delete: "items",
+  comment_add: "items",
+  link_add: "items",
+  link_delete: "items",
+  collection_create: "none",
+  // §18.4 d: research writes carry no tags (research_ask also answers from notebook content)
+  research_source_add: "untagged",
+  research_chat_start: "untagged",
   research_ask: "untagged",
+  research_source_delete: "untagged",
+  // §18.4 c/e (not listed → unsupported): collection_delete (would remove hidden documents), library_* writes, engine tools
 };
 
 export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
@@ -71,7 +88,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
    * Reads and checks the call's narrowing before a read runs: unknown `v` / malformed → `narrowing_unsupported` (409);
    * an op that cannot apply a tag narrowing refuses it. The rule id goes into the receipt meta.
    */
-  function admit(policy: (typeof NARROWING_POLICY)[string], ctx: OpContext): void {
+  function admit(policy: (typeof NARROWING_POLICY)[string] | "unsupported", ctx: OpContext): void {
     let narrowing: Narrowing | null;
     try {
       narrowing = readNarrowing(ctx.context);
@@ -93,21 +110,33 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
     );
   }
 
-  /** Applies `admit` to every op that returns content; writes (except research_ask) run unchanged. */
+  /** Applies `admit` to EVERY op, reads and writes (§18.4, C150): an unlisted op refuses a tag narrowing (fail closed). */
   function narrowed(id: string, spec: HandlerSpec<In, Json>): HandlerSpec<In, Json> {
     const run = spec.run;
     return {
       ...spec,
       run: async (input, ctx) => {
-        const policy = NARROWING_POLICY[id] ?? (ctx.op?.effect === "read" ? "unsupported" : null);
-        if (policy) admit(policy, ctx);
+        admit(NARROWING_POLICY[id] ?? "unsupported", ctx);
         return run(input, ctx);
       },
     };
   }
-  /** A document the narrowing hides answers like a missing one. */
+  /** True when the call's narrowing hides the document (§18.1 tagsMatch). */
+  const hidden = (ctx: OpContext) => (doc: { tags: string[] }) => !tagsPass(doc.tags, tagFilter(ctx));
+  /** A document the narrowing hides answers like a missing one (reads, and writes that address it: §18.4 a). */
   function visible(ctx: OpContext, doc: { tags: string[] }): void {
-    if (!tagsPass(doc.tags, tagFilter(ctx))) throw notFound();
+    if (hidden(ctx)(doc)) throw notFound();
+  }
+  /** §18.4 b: a write never produces an item the caller could not then read (nothing is written). */
+  function resultVisible(ctx: OpContext, tags: string[]): void {
+    const filter = tagFilter(ctx);
+    if (!filter || tagsPass(tags, filter)) return;
+    const ruleId = admitted.get(ctx)?.ruleId ?? "unknown";
+    throw fail(
+      NARROWING_VIOLATION,
+      `the result would carry tags the owner's rule ${ruleId} does not let you read; ${filter.anyOf ? `keep at least one of: ${filter.anyOf.join(", ") || "(none allowed)"}` : "keep the tags allowed"}${filter.noneOf?.length ? `; never add: ${filter.noneOf.join(", ")}` : ""}`,
+      409,
+    );
   }
 
   /** Map domain errors to the envelope; anything unknown propagates (SDK answers 500 and records `failed`). */
@@ -173,6 +202,9 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
    * Engine recall per area (fan-out), keyword fallback per area that cannot answer, one merged ranked answer. Every
    * result carries the canonical document's `tags` ([] for an engine page that is not a canonical document). Under a
    * G5 narrowing only canonical documents whose tags pass are returned (an engine page of unknown tags never is).
+   * QA F88 (L3): an engine answer that cannot be read is a failure (keyword fallback), and an engine that says it ran
+   * degraded (e.g. keyword-only without embeddings) is reported per area and merged with the keyword search; either way
+   * `degraded: true`. The engine state also feeds the app status (F89).
    */
   async function recallAcross(s: Services, ctx: OpContext, areas: string[], query: string, limit: number) {
     const engine = s.engine;
@@ -187,10 +219,12 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
     });
     type TaggedRow = RecallRow & { tags: string[] };
     const lists: { area: string; rows: TaggedRow[] }[] = [];
-    const statuses: { area: string; ok: boolean; via: "engine" | "keyword"; error?: string }[] = [];
+    const statuses: { area: string; ok: boolean; via: "engine" | "keyword"; error?: string; degraded?: string[] }[] = [];
+    const keyword = (area: string): TaggedRow[] =>
+      s.store.search({ areas: [area], query, limit, tags: filter }).map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null, tags: hit.tags }));
     for (const outcome of outcomes) {
       if (outcome.ok && outcome.value) {
-        const rows = outcome.value;
+        const { rows, degraded } = outcome.value;
         const known = s.store.tagsOf(rows.flatMap((row) => (row.documentId ? [row.documentId] : [])));
         const tagged = rows.flatMap((row): TaggedRow[] => {
           const tags = row.documentId ? known.get(row.documentId) : undefined;
@@ -198,15 +232,25 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           return [{ ...row, tags: tags ?? [] }];
         });
         lists.push({ area: outcome.area, rows: tagged });
-        statuses.push({ area: outcome.area, ok: true, via: "engine" });
+        if (degraded.length) {
+          // The engine ran without part of its pipeline: add the keyword search so a degraded engine never hides a memory.
+          lists.push({ area: outcome.area, rows: keyword(outcome.area) });
+          statuses.push({ area: outcome.area, ok: true, via: "engine", degraded });
+        } else statuses.push({ area: outcome.area, ok: true, via: "engine" });
       } else {
-        const hits = s.store.search({ areas: [outcome.area], query, limit, tags: filter });
-        lists.push({ area: outcome.area, rows: hits.map((hit) => ({ area: hit.area, documentId: hit.id, slug: "", title: hit.title, text: hit.excerpt, score: null, tags: hit.tags })) });
+        lists.push({ area: outcome.area, rows: keyword(outcome.area) });
         statuses.push({ area: outcome.area, ok: true, via: "keyword", ...(outcome.error ? { error: outcome.error } : {}) });
       }
     }
     const fallbacks = statuses.filter((status) => status.via === "keyword");
-    if (engine && fallbacks.length) ctx.log.warn("recall fell back to keyword search", { areas: fallbacks.map((f) => `${f.area}:${f.error ?? "unknown"}`).join(",") });
+    const engineDegraded = statuses.flatMap((status) => status.degraded ?? []);
+    if (engine) {
+      const failed = fallbacks.filter((f) => f.error && f.error !== "area_not_ready" && f.error !== "no_engine");
+      knowledge.noteEngine(failed.length ? { state: "failing", detail: [...new Set(failed.map((f) => f.error as string))] } : engineDegraded.length ? { state: "degraded", detail: [...new Set(engineDegraded)] } : statuses.some((st) => st.via === "engine") ? { state: "ok", detail: [] } : null);
+    }
+    if (engine && (fallbacks.length || engineDegraded.length)) {
+      ctx.log.warn("recall degraded", { areas: [...fallbacks.map((f) => `${f.area}:${f.error ?? "unknown"}`), ...statuses.filter((st) => st.degraded).map((st) => `${st.area}:${(st.degraded ?? []).join("+")}`)].join(",") });
+    }
     const results = mergeRanked(lists, (row) => row.documentId ?? `${row.area}:${row.slug}:${row.text.slice(0, 64)}`, limit).map((row) => ({
       documentId: row.documentId,
       title: row.title,
@@ -214,7 +258,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
       tags: row.tags,
       areas: row.areas,
     }));
-    return { results, areas: statuses, partial: false, degraded: fallbacks.length > 0 };
+    return { results, areas: statuses, partial: false, degraded: fallbacks.length > 0 || engineDegraded.length > 0 };
   }
 
   const handlers: Record<string, HandlerSpec<In, Json>> = {
@@ -239,6 +283,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const area = defaultArea(ctx, input.area);
           await writable(ctx, area, "create");
           if (!s.areas.get(area)) throw notFound();
+          resultVisible(ctx, cleanTags(input.tags));
           const text = String(input.text);
           const firstLine = text.split(/\r?\n/u).find((line) => line.trim())?.trim() ?? "Memory";
           const doc = s.store.createDocument({
@@ -323,6 +368,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const area = defaultArea(ctx, input.area);
           await writable(ctx, area, "create");
           if (!s.areas.get(area)) throw notFound();
+          resultVisible(ctx, cleanTags(input.tags));
           const doc = s.store.createDocument({
             area,
             collectionId: input.collectionId,
@@ -333,6 +379,7 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
             status: input.status,
             tags: input.tags,
             actor: actor(ctx),
+            hidden: hidden(ctx),
           });
           await knowledge.provision(s, ctx).catch(() => undefined);
           knowledge.kick(s);
@@ -347,7 +394,11 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const s = services(ctx);
           const doc = documentFor(s, String(input.id));
+          // §18.4 a: visibility before the access check, so a hidden document answers exactly like a missing one.
+          await readable(ctx, doc.area);
+          visible(ctx, doc);
           await writable(ctx, doc.area, "update");
+          if (input.tags !== undefined) resultVisible(ctx, cleanTags(input.tags));
           const updated = s.store.updateDocument(doc.id, { title: input.title, body: input.body, summary: input.summary, status: input.status, tags: input.tags }, input.expectedVersion, actor(ctx));
           knowledge.kick(s);
           return { id: updated.id, version: updated.version };
@@ -362,6 +413,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const s = services(ctx);
           const doc = documentFor(s, String(input.id));
+          await readable(ctx, doc.area);
+          visible(ctx, doc);
           await writable(ctx, doc.area, "delete");
           s.store.deleteDocument(doc.id, actor(ctx));
           knowledge.kick(s);
@@ -400,6 +453,8 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const s = services(ctx);
           const doc = documentFor(s, String(input.documentId));
+          await readable(ctx, doc.area);
+          visible(ctx, doc);
           await writable(ctx, doc.area, "create");
           return s.store.addComment(doc.id, String(input.body), input.parentId, actor(ctx));
         }),
@@ -424,8 +479,11 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         wrap(async () => {
           const s = services(ctx);
           const doc = documentFor(s, String(input.sourceId));
+          await readable(ctx, doc.area);
+          visible(ctx, doc);
           await writable(ctx, doc.area, "create");
-          return s.store.addLink(doc.id, String(input.targetId), typeof input.type === "string" ? input.type : "references", actor(ctx));
+          // A hidden target answers like a missing one (the store checks it in the same place, §18.4 a).
+          return s.store.addLink(doc.id, String(input.targetId), typeof input.type === "string" ? input.type : "references", actor(ctx), hidden(ctx));
         }),
     },
 
@@ -588,6 +646,13 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
           const s = services(ctx);
           const link = s.store.getLink(String(input.id));
           if (!link) throw notFound();
+          await readable(ctx, link.area);
+          // §18.4 a: a link with a hidden end is not listed (links_list), so it answers like a missing one.
+          for (const end of [link.sourceId, link.targetId]) {
+            const doc = s.store.getDocument(end);
+            if (!doc) throw notFound();
+            visible(ctx, doc);
+          }
           await writable(ctx, link.area, "delete");
           s.store.deleteLink(link.id);
           return { id: link.id, deleted: true };
@@ -665,8 +730,9 @@ export function createHandlers(knowledge: Knowledge, TbError: ErrorFactory) {
         if (!engine) throw fail("engine_capability_unavailable", "no memory engine in this deployment", 404);
         const op = engine.resolve(tool);
         if (!op) throw fail("engine_capability_unavailable", "this engine tool is not available", 404);
-        // G5: engine pages carry engine-side tags this app cannot match against the narrowing, so a narrowed read is refused.
-        if (op.effect === "read") admit("unsupported", ctx);
+        // G5: engine pages carry engine-side tags this app cannot match against the narrowing, so a narrowed call is
+        // refused, reads and writes alike (§18.2, §18.4 e).
+        admit("unsupported", ctx);
         const { area: requested, ...upstreamArgs } = args as In;
         // Writes, stateful reads and model-cost reads run in one area; stateless reads may fan out.
         const single = op.effect !== "read" || op.modelCost || !op.fanOut || typeof requested === "string";

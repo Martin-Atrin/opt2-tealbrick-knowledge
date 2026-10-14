@@ -91,15 +91,21 @@ const STATUS_OPTIONS = [
 ];
 
 export function Library({ nav, setNav }: { nav: LibraryNav; setNav: SetNav }) {
-  const { areas, error } = useOverview();
+  const { areas, engine, error } = useOverview();
   useEffect(() => {
     if (areas?.length && !areas.some((a) => a.id === nav.area) && !nav.documentId) setNav({ area: areas[0]?.id ?? "", collectionId: "" });
   }, [areas, nav.area, nav.documentId, setNav]);
   if (error) return <ErrorNotice error={error} />;
   if (!areas) return <p className="kn-muted">Loading…</p>;
   if (!areas.length) return <Notice tone="action">No memory area is available yet.</Notice>;
+  const engineNotice = engine?.attention ? <Notice tone="action">{engine.attention.reason}</Notice> : null;
   if (nav.documentId) return <DocumentView id={nav.documentId} nav={nav} setNav={setNav} />;
-  return <Browse areas={areas} nav={nav} setNav={setNav} />;
+  return (
+    <>
+      {engineNotice}
+      <Browse areas={areas} nav={nav} setNav={setNav} />
+    </>
+  );
 }
 
 function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; documents?: number }[]; nav: LibraryNav; setNav: SetNav }) {

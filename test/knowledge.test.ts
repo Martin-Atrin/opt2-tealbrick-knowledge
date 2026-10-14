@@ -322,9 +322,8 @@ test("G5: unknown v or a malformed narrowing refuses with narrowing_unsupported 
   // Another app's context key is not a narrowing.
   const other = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA, { context: { "kanban.narrowing": { v: 9 } } }));
   assert.equal(other.results.length, 5);
-  // Writes are not narrowed (a narrowing limits what a call returns).
-  const saved = await run("remember", { text: "written under a narrowing" }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }, 2) }));
-  assert.ok(saved.documentId);
+  // C150 (spec 0.1.28 §18.4): writes are narrowed too, so an unknown v refuses a write as well (fail closed).
+  await assert.rejects(run("remember", { text: "written under a narrowing", tags: ["work"] }, ctx(ADA, { context: narrowing({ anyOf: ["work"] }, 2) })), rejects("narrowing_unsupported"));
   // Engine read tools cannot match engine-side tags: refused under a tag narrowing, allowed without one.
   const dynamic = definition.dynamic?.engine;
   assert.ok(dynamic);
@@ -377,4 +376,203 @@ test("G5: research ops carry no tags — anyOf refuses, noneOf alone runs; every
   for (const op of definition.manifest.operations) {
     if (op.effect === "read" && !op.dynamic && op.audience !== "person") assert.ok(NARROWING_POLICY[op.id], `agent read op ${op.id} has a G5 policy`);
   }
+});
+
+// ── C150 / QA F90 (S1): a narrowing binds WRITES (spec 0.1.28 SDK-API §18.4). Each rule: quiet on the good case, fires on the bad case (L34). ──
+
+/** The error a call answers with, reduced to what a caller can observe. */
+async function refusal(promise: Promise<unknown>): Promise<{ code: string; message: string; status: number }> {
+  try {
+    await promise;
+  } catch (error) {
+    assert.ok(error instanceof TestError, String(error));
+    return { code: error.code, message: error.message, status: error.httpStatus };
+  }
+  assert.fail("the call was expected to be refused");
+}
+
+const MISSING_DOC = "kdoc_01ZZZZZZZZZZZZZZZZZZZZZZZZ";
+
+test("F90: document_update — a hidden document answers exactly like a missing one and is not changed; a visible one updates (receipt names the rule)", async () => {
+  const { ctx, run, db, work, personal, both } = await taggedMemories();
+  const metas: Json[] = [];
+  const n = (memoryTags: Record<string, string[]>) => ctx(ADA, { context: narrowing(memoryTags), receipt: { summary() {}, meta: (m: Json) => metas.push(m) } });
+  // good: a visible document updates
+  assert.equal((await run("document_update", { id: work, body: "teal heron rollout plan v2", expectedVersion: 1 }, n({ anyOf: ["work"] }))).version, 2);
+  assert.deepEqual(metas.at(-1), { narrowing: { v: 1, ruleId: "rul_01TESTRULE0000000000000000" } });
+  // bad (the QA repro): re-tag a hidden document to an allowed tag, then read it
+  const hidden = await refusal(run("document_update", { id: personal, tags: ["work"] }, n({ anyOf: ["work"] })));
+  const missing = await refusal(run("document_update", { id: MISSING_DOC, tags: ["work"] }, n({ anyOf: ["work"] })));
+  assert.deepEqual(hidden, missing, "no existence oracle: hidden id = missing id");
+  assert.equal(hidden.code, "not_found");
+  // a stale expectedVersion must not tell a hidden document apart either (visibility is checked first)
+  assert.deepEqual(await refusal(run("document_update", { id: personal, body: "x", expectedVersion: 9 }, n({ anyOf: ["work"] }))), missing);
+  await assert.rejects(run("document_get", { id: personal }, n({ anyOf: ["work"] })), rejects("not_found"));
+  // bad (QA H-SECRET): remove the noneOf tag of a hidden document
+  assert.deepEqual(await refusal(run("document_update", { id: both, tags: ["work"] }, n({ noneOf: ["personal"] }))), missing);
+  const row = db.prepare("SELECT version, tags FROM kn_documents WHERE id = ?").get(both) as Record<string, unknown>;
+  assert.deepEqual([row.version, JSON.parse(String(row.tags))], [1, ["work", "personal"]], "nothing was written");
+  assert.equal((await run("document_get", { id: personal }, ctx(ADA))).version, 1, "the hidden document is unchanged");
+});
+
+test("F90: a write whose result the writer could not read is refused with narrowing_violation (update, remember, document_create)", async () => {
+  const { ctx, run, db, work } = await taggedMemories();
+  const n = (memoryTags: Record<string, string[]>) => ctx(ADA, { context: narrowing(memoryTags) });
+  // update: keep an allowed tag → runs; drop every allowed tag → refused; add a noneOf tag → refused
+  assert.equal((await run("document_update", { id: work, tags: ["work", "acme"], expectedVersion: 1 }, n({ anyOf: ["work"] }))).version, 2);
+  const violation = await refusal(run("document_update", { id: work, tags: ["personal"] }, n({ anyOf: ["work"] })));
+  assert.equal(violation.code, "narrowing_violation");
+  assert.equal(violation.status, 409);
+  assert.match(violation.message, /rul_01TESTRULE0000000000000000/u);
+  assert.equal((await refusal(run("document_update", { id: work, tags: ["work", " Secret "] }, n({ noneOf: ["secret"] })))).code, "narrowing_violation");
+  assert.equal((await run("document_get", { id: work }, ctx(ADA))).version, 2, "refused updates wrote nothing");
+  // an update that leaves the tags alone runs (the result keeps its visible tags)
+  assert.equal((await run("document_update", { id: work, body: "body only" }, n({ anyOf: ["work"] }))).version, 3);
+  // remember / document_create: an allowed tag → runs; untagged or outside anyOf → refused, nothing written
+  const before = (db.prepare("SELECT COUNT(*) AS n FROM kn_documents").get() as { n: number }).n;
+  assert.ok((await run("remember", { text: "allowed memory", tags: ["WORK"] }, n({ anyOf: ["work"] }))).documentId);
+  assert.equal((await refusal(run("remember", { text: "untagged memory" }, n({ anyOf: ["work"] })))).code, "narrowing_violation");
+  assert.equal((await refusal(run("remember", { text: "other memory", tags: ["personal"] }, n({ anyOf: ["work"] })))).code, "narrowing_violation");
+  assert.ok((await run("document_create", { title: "Allowed doc", tags: ["work"] }, n({ anyOf: ["work"] }))).id);
+  assert.equal((await refusal(run("document_create", { title: "Secret doc", tags: ["secret"] }, n({ noneOf: ["secret"] })))).code, "narrowing_violation");
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM kn_documents").get() as { n: number }).n, before + 2, "only the two allowed creates wrote");
+  // without a narrowing nothing is refused (quiet on the good case)
+  assert.ok((await run("remember", { text: "untagged without a rule" }, ctx(ADA))).documentId);
+});
+
+test("F90: comment_add, link_add, link_delete, document_delete and a hidden parent answer like missing items under a narrowing", async () => {
+  const { ctx, run, db, work, personal, untagged, both } = await taggedMemories();
+  const n = () => ctx(ADA, { context: narrowing({ anyOf: ["work"] }) });
+  // comment_add: visible → runs; hidden = missing
+  assert.ok((await run("comment_add", { documentId: work, body: "ok" }, n())).id);
+  assert.deepEqual(await refusal(run("comment_add", { documentId: personal, body: "peek" }, n())), await refusal(run("comment_add", { documentId: MISSING_DOC, body: "peek" }, n())));
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM kn_comments WHERE document_id = ?").get(personal) as { n: number }).n, 0);
+  // link_add: visible → visible runs; a hidden source = missing source; a hidden target = missing target
+  assert.ok((await run("link_add", { sourceId: work, targetId: both }, n())).id);
+  assert.deepEqual(await refusal(run("link_add", { sourceId: personal, targetId: work }, n())), await refusal(run("link_add", { sourceId: MISSING_DOC, targetId: work }, n())));
+  const hiddenTarget = await refusal(run("link_add", { sourceId: work, targetId: untagged }, n()));
+  assert.deepEqual(hiddenTarget, await refusal(run("link_add", { sourceId: work, targetId: MISSING_DOC }, n())));
+  assert.equal(hiddenTarget.code, "link_target_not_found");
+  // link_delete: a link with a hidden end answers like a missing link; a visible link is deleted
+  const hiddenLink = await run("link_add", { sourceId: work, targetId: untagged }, ctx(ADA));
+  assert.deepEqual(await refusal(run("link_delete", { id: hiddenLink.id }, n())), await refusal(run("link_delete", { id: "klnk_01ZZZZZZZZZZZZZZZZZZZZZZZZ" }, n())));
+  const visibleLink = await run("link_add", { sourceId: both, targetId: work }, ctx(ADA));
+  assert.equal((await run("link_delete", { id: visibleLink.id }, n())).deleted, true);
+  // document_delete: hidden = missing (and stays); visible runs
+  assert.deepEqual(await refusal(run("document_delete", { id: personal }, n())), await refusal(run("document_delete", { id: MISSING_DOC }, n())));
+  assert.ok(await run("document_get", { id: personal }, ctx(ADA)));
+  // document_create under a hidden parent = under a missing parent
+  const collectionId = (await run("document_get", { id: work }, ctx(ADA))).collectionId as string;
+  const hiddenParent = await refusal(run("document_create", { title: "child", collectionId, parentId: personal, tags: ["work"] }, n()));
+  assert.deepEqual(hiddenParent, await refusal(run("document_create", { title: "child", collectionId, parentId: MISSING_DOC, tags: ["work"] }, n())));
+  assert.equal(hiddenParent.code, "parent_invalid");
+  assert.ok((await run("document_create", { title: "child", collectionId, parentId: work, tags: ["work"] }, n())).id);
+  assert.equal((await run("document_delete", { id: both }, n())).deleted, true);
+});
+
+test("F90: a hidden company document answers like a missing one even where the agent may not write (no scope_denied oracle)", async () => {
+  const { ctx, run } = await setup();
+  const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null } });
+  const secret = await run("library_document_create", { area: "company", title: "Company secret", tags: ["secret"] }, owner);
+  const open = await run("library_document_create", { area: "company", title: "Company notice", tags: ["work"] }, owner);
+  const n = () => ctx(ADA, { context: narrowing({ anyOf: ["work"] }) });
+  const missing = await refusal(run("document_update", { id: MISSING_DOC, body: "x" }, n()));
+  assert.deepEqual(await refusal(run("document_update", { id: secret.id, body: "x" }, n())), missing);
+  // the visible company document still answers scope_denied (read-only area): the check order is unchanged for it
+  assert.equal((await refusal(run("document_update", { id: open.id, body: "x" }, n()))).code, "scope_denied");
+});
+
+test("F90: writes that cannot be checked item by item refuse a tag narrowing (collection_delete, research, engine tools, person library); collection_create runs", async () => {
+  const { ctx, run, definition } = await taggedMemories();
+  const n = (memoryTags: Record<string, string[]> = { anyOf: ["work"] }) => ctx(ADA, { context: narrowing(memoryTags) });
+  const collection = await run("collection_create", { name: "Narrowed" }, n());
+  assert.ok(collection.id, "a container without tags can be created");
+  await assert.rejects(run("collection_delete", { id: collection.id }, n()), rejects("narrowing_unsupported"));
+  assert.equal((await run("collection_delete", { id: collection.id }, ctx(ADA))).deleted, true, "runs without a narrowing");
+  await assert.rejects(run("research_source_add", { title: "t", content: "c" }, n()), rejects("narrowing_unsupported"));
+  await assert.rejects(run("research_chat_start", {}, n()), rejects("narrowing_unsupported"));
+  await assert.rejects(run("research_source_delete", { id: "source:x" }, n()), rejects("narrowing_unsupported"));
+  // noneOf alone: research writes run (research is off here, so the engine answers research_disabled)
+  await assert.rejects(run("research_source_add", { title: "t", content: "c" }, n({ noneOf: ["personal"] })), rejects("research_disabled"));
+  const dynamic = definition.dynamic?.engine;
+  assert.ok(dynamic);
+  await assert.rejects(dynamic.call("gb_remember", { fact: "x", area: ADA_AREA }, n()), rejects("narrowing_unsupported"));
+  const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null }, context: narrowing({ anyOf: ["work"] }) });
+  await assert.rejects(run("library_document_update", { id: MISSING_DOC, body: "x" }, owner), rejects("narrowing_unsupported"));
+  await assert.rejects(run("library_comment_add", { documentId: MISSING_DOC, body: "x" }, owner), rejects("narrowing_unsupported"));
+});
+
+test("F90: every agent write op has a decided narrowing policy; every write that names an existing item is checked per item", async () => {
+  const { definition } = await setup();
+  const ADDRESSING = ["document_update", "document_delete", "comment_add", "link_add", "link_delete", "document_create", "remember"];
+  for (const id of ADDRESSING) assert.equal(NARROWING_POLICY[id], "items", id);
+  for (const op of definition.manifest.operations) {
+    if (op.effect === "read" || op.dynamic || op.audience === "person") continue;
+    const decided = NARROWING_POLICY[op.id] ?? (["collection_delete"].includes(op.id) ? "unsupported" : undefined);
+    assert.ok(decided, `agent write op ${op.id} has a G5 write policy (§18.4)`);
+  }
+});
+
+// ── QA F88 / F89: a degraded engine answer is read, reported and never silent (L3) ──
+
+test("F88 (real upstream framing): recall reads the result item of a degraded GBrain answer, reports degraded and adds keyword search", async () => {
+  const { ctx, run, knowledge, definition } = await taggedMemories();
+  gbrain.queryReply = "upstream-degraded";
+  try {
+    const out = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA));
+    // 0.1.15 read 0 rows here (2 text items → raw result) and said ok / degraded:false
+    assert.ok(out.results.length >= 4, JSON.stringify(out));
+    assert.equal(out.degraded, true);
+    assert.deepEqual(out.areas, [{ area: ADA_AREA, ok: true, via: "engine", degraded: ["embed_unavailable:no_provider"] }]);
+    assert.equal(knowledge.engineStatus().state, "degraded");
+    assert.match(knowledge.attention()?.reason ?? "", /without embeddings \(embed_unavailable:no_provider\)/u);
+    // the engine tools return the result item too (never the raw MCP envelope with notice text)
+    const rows = await definition.dynamic?.engine?.call("gb_query", { query: "teal heron", area: ADA_AREA }, ctx(ADA));
+    assert.ok(Array.isArray(rows) && rows.length >= 4, "gb_query answers the row array, not the MCP envelope");
+  } finally {
+    gbrain.queryReply = undefined;
+  }
+  // healthy again: quiet (L34)
+  const healthy = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA));
+  assert.equal(healthy.degraded, false);
+  assert.equal(knowledge.engineStatus().state, "ok");
+  assert.equal(knowledge.attention(), null);
+});
+
+test("F88: an engine answer that cannot be read falls back to keyword search with degraded:true (never an ok empty answer)", async () => {
+  const { ctx, run, knowledge } = await taggedMemories();
+  gbrain.queryReply = "unparsable";
+  try {
+    const out = await run("recall", { query: "teal heron", area: ADA_AREA }, ctx(ADA));
+    assert.equal(out.degraded, true);
+    assert.deepEqual(out.areas, [{ area: ADA_AREA, ok: true, via: "keyword", error: "engine_unparsable" }]);
+    assert.ok(out.results.length >= 4, "keyword search still finds the memories");
+    assert.equal(knowledge.attention()?.code, "memory_engine_failing");
+  } finally {
+    gbrain.queryReply = undefined;
+  }
+});
+
+test("F89: the engine probe reports a degraded engine through attention and pushes the status once per change", async () => {
+  const { ctx, run, knowledge } = await taggedMemories();
+  await run("recall", { query: "warm up", area: "company" }, ctx(ADA)); // company source provisioned
+  const s = knowledge.current();
+  assert.ok(s);
+  let pushes = 0;
+  gbrain.queryReply = "upstream-degraded";
+  try {
+    await knowledge.watchEngine(s, () => pushes++, 0);
+    assert.equal(knowledge.attention()?.code, "memory_engine_degraded");
+    assert.equal(pushes, 1);
+    await knowledge.probeEngine(s);
+    assert.equal(pushes, 1, "no push without a change");
+  } finally {
+    gbrain.queryReply = undefined;
+  }
+  await knowledge.probeEngine(s);
+  assert.equal(knowledge.attention(), null);
+  assert.equal(pushes, 2, "the recovery is pushed too");
+  const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null } });
+  const overview = await run("library_overview", {}, owner);
+  assert.equal(overview.engine.state, "ok");
 });

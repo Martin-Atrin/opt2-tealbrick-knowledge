@@ -13,6 +13,8 @@ export const migrationsDir = new URL("../migrations", import.meta.url).pathname;
 /** SDK C33 start context (structural; the SDK's StartContext also carries `secrets`). */
 export interface StartContext {
   db: Db;
+  /** SDK v0.1.13 (C86): push the app status now (debounced) */
+  statusChanged?(): void;
   secrets: AppSecrets;
   log: Logger;
   scopes: ScopeStore;
@@ -20,7 +22,7 @@ export interface StartContext {
   callServiceHelper<O = Json>(serviceId: string, path: string, body: Json): Promise<O>;
 }
 
-export type KnowledgeDefinition = AppDefinition & { onStart(ctx: StartContext): Promise<void> };
+export type KnowledgeDefinition = AppDefinition & { onStart(ctx: StartContext): Promise<void>; attention?(): Promise<{ code: string; reason: string } | null> };
 
 export function knowledgeDefinition(env: Record<string, string | undefined>, TbError: ErrorFactory, opts: KnowledgeOptions = {}): { definition: KnowledgeDefinition; knowledge: Knowledge } {
   const knowledge = new Knowledge(readConfig(env), opts);
@@ -33,6 +35,8 @@ export function knowledgeDefinition(env: Record<string, string | undefined>, TbE
       dynamic,
       events,
       migrations: migrationsDir,
+      // QA F89 (L3, spec 0.1.28): a degraded or failing memory engine reaches the owner through the status push.
+      attention: async () => knowledge.attention(),
       // The SDK backs up app.db and each deployed service (manifest `backups` + `services[].backup`).
       backup: {
         async afterRestore() {
@@ -51,7 +55,9 @@ export function knowledgeDefinition(env: Record<string, string | undefined>, TbE
         const retried = services.projector?.retryFailed() ?? 0;
         if (retried) ctx.log.info("projection retry after boot", { rows: retried });
         knowledge.kick(services);
-        ctx.log.info("knowledge started", { engine: services.engine ? "gbrain" : "none", research: services.notebook !== null, areas: services.areas.list().length });
+        // F89: probe the engine now (and every 10 min) so a degraded engine shows before the first recall.
+        await knowledge.watchEngine(services, ctx.statusChanged ? () => ctx.statusChanged?.() : null, opts.engineProbeMs).catch(() => undefined);
+        ctx.log.info("knowledge started", { engine: services.engine ? "gbrain" : "none", engineState: knowledge.engineStatus().state, research: services.notebook !== null, areas: services.areas.list().length });
       },
     },
   };

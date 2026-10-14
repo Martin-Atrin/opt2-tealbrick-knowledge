@@ -4,7 +4,7 @@
 // (one Knowledge area), so upstream itself enforces source isolation. One client per (source, agent)
 // keeps upstream ownership (forget) and delta cursors per agent.
 import { createHash, randomBytes } from "node:crypto";
-import { callTool, GBrainError, listTools } from "./transport.ts";
+import { callToolAnswer, GBrainError, listTools, type ToolAnswer } from "./transport.ts";
 
 /** Upstream source id grammar (≤ 32 chars). */
 export const SOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/u;
@@ -174,8 +174,13 @@ export class GBrainClient {
   }
 
   async call(sourceId: string, name: string, args: Record<string, unknown>, opts: { principalId?: string; timeoutMs?: number } = {}): Promise<unknown> {
+    return (await this.callAnswer(sourceId, name, args, opts)).data;
+  }
+
+  /** `call` with upstream's notices and degraded stages (recall reports a degraded engine, QA F88/F89). */
+  async callAnswer(sourceId: string, name: string, args: Record<string, unknown>, opts: { principalId?: string; timeoutMs?: number } = {}): Promise<ToolAnswer> {
     const invoke = async () =>
-      callTool({ baseUrl: this.baseUrl, token: await this.token(sourceId, opts.principalId), name, args, timeoutMs: opts.timeoutMs, fetch: this.fetcher });
+      callToolAnswer({ baseUrl: this.baseUrl, token: await this.token(sourceId, opts.principalId), name, args, timeoutMs: opts.timeoutMs, fetch: this.fetcher });
     try {
       return await invoke();
     } catch (error) {

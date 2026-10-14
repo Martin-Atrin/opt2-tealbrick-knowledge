@@ -137,8 +137,18 @@ export interface FakeGBrain {
   calls: { source: string; name: string; args: Record<string, unknown> }[];
   /** override a tool's answer: return undefined to fall through */
   answer?: (source: string, name: string, args: Record<string, unknown>) => unknown;
+  /**
+   * How `query` answers (QA F88): `fake` = one `{results}` text item; `upstream-degraded` = byte-for-byte the framing of
+   * a REAL upstream 0.60.57.0 keyless answer (test/fixtures/gbrain-replies/query-degraded-0.60.57.0.json: bare row
+   * array, then a `[gbrain notice degraded_recall …]` block, `_meta.gbrain_notices` and `_meta.retrieval.degraded`) with
+   * this fake's rows; `unparsable` = a text item that is not a row list.
+   */
+  queryReply?: "fake" | "upstream-degraded" | "unparsable";
   close(): Promise<void>;
 }
+
+/** A real upstream GBrain 0.60.57.0 answer to `query` on a keyless brain over HTTP (captured from the pinned upstream). */
+export const UPSTREAM_DEGRADED_QUERY: unknown = JSON.parse(readFileSync(new URL("./fixtures/gbrain-replies/query-degraded-0.60.57.0.json", import.meta.url), "utf8"));
 
 /** A small stand-in for `gbrain serve --http`: admin login, client registration, client_credentials tokens, stateless MCP. */
 export async function fakeGBrain(): Promise<FakeGBrain> {
@@ -213,6 +223,13 @@ export async function fakeGBrain(): Promise<FakeGBrain> {
         const results = [...pages.entries()]
           .filter(([, page]) => words.some((word) => page.content.toLowerCase().includes(word)))
           .map(([pageSlug, page], i) => ({ slug: pageSlug, title: pageSlug, chunk_text: page.content.slice(-200), score: 1 - i / 10, source_id: source }));
+        if (state.queryReply === "unparsable") return reply({ content: [{ type: "text", text: "search backend restarting" }, { type: "text", text: "[gbrain notice degraded_recall kind=degraded]\nwhy: x" }] });
+        if (state.queryReply === "upstream-degraded") {
+          const real = UPSTREAM_DEGRADED_QUERY as { content: { type: string; text: string }[]; _meta: Record<string, unknown> };
+          const template = (JSON.parse(real.content[0]?.text ?? "[]") as Record<string, unknown>[])[0] ?? {};
+          const rows = results.map((row) => ({ ...template, ...row }));
+          return reply({ content: [{ type: "text", text: JSON.stringify(rows) }, ...real.content.slice(1)], _meta: real._meta });
+        }
         return reply({ content: [{ type: "text", text: JSON.stringify({ results }) }] });
       }
       return reply({ content: [{ type: "text", text: JSON.stringify({ ok: true, name }) }] });

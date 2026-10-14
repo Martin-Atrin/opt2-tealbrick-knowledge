@@ -107,13 +107,23 @@ export interface AreaOption {
   researchReady: boolean;
 }
 
+/** QA F89: the memory engine's last known state; `attention` is set while the owner should act. */
+export interface EngineState {
+  state: "unknown" | "ok" | "degraded" | "failing";
+  attention: { code: string; reason: string } | null;
+}
+
 export function useOverview() {
   const [areas, setAreas] = useState<AreaOption[] | null>(null);
+  const [engine, setEngine] = useState<EngineState | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    run<{ areas: AreaOption[] }>("library_overview")
-      .then((r) => setAreas(r.areas))
+    run<{ areas: AreaOption[]; engine?: EngineState }>("library_overview")
+      .then((r) => {
+        setAreas(r.areas);
+        setEngine(r.engine ?? null);
+      })
       .catch((e: unknown) => setError(errText(e)));
   }, []);
-  return { areas, error };
+  return { areas, engine, error };
 }

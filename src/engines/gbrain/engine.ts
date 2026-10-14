@@ -68,19 +68,35 @@ export function engineError(error: unknown): EngineCallError {
   return new EngineCallError("engine_unavailable", "the memory engine did not answer", 503);
 }
 
-function findRows(data: unknown, depth = 0): Record<string, unknown>[] {
-  if (depth > 4 || data === null || typeof data !== "object") return [];
+const isRow = (item: unknown): item is Record<string, unknown> =>
+  item !== null && typeof item === "object" && !Array.isArray(item) && (typeof (item as Record<string, unknown>).slug === "string" || typeof (item as Record<string, unknown>).chunk_text === "string" || typeof (item as Record<string, unknown>).text === "string");
+
+/**
+ * Recall rows of an engine answer, or null when the answer has no recognisable row list (QA F88: an answer that cannot
+ * be read is NOT "no results"; the caller falls back to keyword search and reports `degraded`). An empty list is a
+ * real empty answer.
+ */
+export function findRows(data: unknown, depth = 0): Record<string, unknown>[] | null {
+  if (depth > 4 || data === null || typeof data !== "object") return null;
   if (Array.isArray(data)) {
-    const rows = data.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item));
-    if (rows.some((row) => typeof row.slug === "string" || typeof row.chunk_text === "string" || typeof row.text === "string")) return rows;
-    return [];
+    if (data.length === 0) return [];
+    const rows = data.filter(isRow);
+    return rows.length ? rows : null;
   }
   const record = data as Record<string, unknown>;
   for (const key of ["results", "hits", "evidence", "items", "chunks", "pages"]) {
+    if (!(key in record)) continue;
     const rows = findRows(record[key], depth + 1);
-    if (rows.length) return rows;
+    if (rows) return rows;
   }
-  return [];
+  return null;
+}
+
+/** One area's engine recall: rows, and why the engine answered in a degraded way (empty = full hybrid recall). */
+export interface RecallAnswer {
+  rows: RecallRow[];
+  /** recall-affecting degraded stages (`stage` or `stage:reason`) and degraded notice codes; closed upstream vocabularies */
+  degraded: string[];
 }
 
 export class GBrainEngine {
@@ -106,10 +122,19 @@ export class GBrainEngine {
     await this.client.deleteCanonicalPage(sourceId, `${PAGE_PREFIX}${documentId}`);
   }
 
-  /** Hybrid search in one area's source; rows normalized and sanitized. */
-  async recall(area: string, sourceId: string, query: string, limit: number, principalId: string): Promise<RecallRow[]> {
-    const data = sanitizeResult(await this.client.call(sourceId, "query", { query, limit }, { principalId, timeoutMs: 120_000 }), sourceId);
-    return findRows(data)
+  /**
+   * Hybrid search in one area's source; rows normalized and sanitized, with what upstream reported as degraded. An
+   * answer without a readable row list throws `engine_unparsable` (the caller falls back, never a silent empty list).
+   */
+  async recall(area: string, sourceId: string, query: string, limit: number, principalId?: string): Promise<RecallAnswer> {
+    const answer = await this.client.callAnswer(sourceId, "query", { query, limit }, { ...(principalId ? { principalId } : {}), timeoutMs: 120_000 });
+    const found = findRows(sanitizeResult(answer.data, sourceId));
+    if (!found) throw new EngineCallError("engine_unparsable", "the memory engine answer could not be read", 502);
+    const degraded = [
+      ...answer.degraded.map((d) => (d.reason ? `${d.stage}:${d.reason}` : d.stage)),
+      ...answer.notices.filter((n) => n.kind === "degraded" && !answer.degraded.length).map((n) => n.code),
+    ];
+    const rows = found
       .slice(0, limit)
       .map((row) => {
         const slug = typeof row.slug === "string" ? row.slug : "";
@@ -122,6 +147,7 @@ export class GBrainEngine {
           score: typeof row.score === "number" ? row.score : null,
         };
       });
+    return { rows, degraded: [...new Set(degraded)] };
   }
 
   async catalog(): Promise<DynamicCatalogEntry[]> {
