@@ -7,7 +7,8 @@ ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
-COPY tsconfig.json tsconfig.build.json ./
+# scripts/build-ui.ts reads the product id from the manifest (kit still for the app header).
+COPY tealbrick.manifest.json tsconfig.json tsconfig.build.json ./
 COPY scripts ./scripts
 COPY src ./src
 RUN pnpm run build && pnpm prune --prod --config.ignore-scripts=true
