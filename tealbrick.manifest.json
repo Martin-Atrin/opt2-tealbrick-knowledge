@@ -5,14 +5,14 @@
   "name": "Knowledge",
   "summary": "Memory and documents for your agents: a private memory area per agent, a shared company area, research notebooks.",
   "description": "Knowledge gives every connected agent its own memory area and a shared company area. Agents remember and recall through memory tools; documents keep revisions, comments and links. Memory runs on GBrain, research on Open Notebook, both inside your own deployment.",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick"
   },
   "source": {
     "repo": "https://github.com/Martin-Atrin/opt2-tealbrick-knowledge",
-    "license": "MIT"
+    "license": "Apache-2.0"
   },
   "icon": {
     "svgPath": "M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2 4.5V17h8v-3.5c.8-.9 2-2.3 2-4.5a6 6 0 0 0-6-6z M9 20h6 M10 22h4",

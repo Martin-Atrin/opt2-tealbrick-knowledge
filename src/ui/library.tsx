@@ -1,7 +1,7 @@
 // Library page: area -> collection -> document. Navigation state lives in App so Recall and Research can open a document here.
-import { Button, Dialog, Field, Notice, Select, Tabs, Tag, TextInput } from "@opt2-tealbrick/ui";
-import { useCallback, useEffect, useState } from "react";
-import { ConfirmDelete, ErrorNotice, errText, isConflict, run, type Status, statusTone, TextBlock, useDebounced, useOverview, when } from "./common.tsx";
+import { Button, Card, Dialog, Field, Notice, SearchIcon, Section, Segmented, Select, Table, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
+import { type CSSProperties, useCallback, useEffect, useState } from "react";
+import { ConfirmDelete, ErrorNotice, errText, isConflict, Loading, run, type Status, statusTag, TextBlock, useDebounced, useOverview, when } from "./common.tsx";
 
 /** Empty string means "not chosen". */
 export interface LibraryNav {
@@ -96,15 +96,16 @@ export function Library({ nav, setNav }: { nav: LibraryNav; setNav: SetNav }) {
     if (areas?.length && !areas.some((a) => a.id === nav.area) && !nav.documentId) setNav({ area: areas[0]?.id ?? "", collectionId: "" });
   }, [areas, nav.area, nav.documentId, setNav]);
   if (error) return <ErrorNotice error={error} />;
-  if (!areas) return <p className="kn-muted">Loading…</p>;
-  if (!areas.length) return <Notice tone="action">No memory area is available yet.</Notice>;
-  const engineNotice = engine?.attention ? <Notice tone="action">{engine.attention.reason}</Notice> : null;
+  if (!areas) return <Loading what="the library" />;
+  if (!areas.length) return <Notice tone="needs-you">No memory area is available yet.</Notice>;
+  // F89: the memory engine's reason stays visible while the owner has to act.
+  const engineNotice = engine?.attention ? <Notice tone="needs-you">{engine.attention.reason}</Notice> : null;
   if (nav.documentId) return <DocumentView id={nav.documentId} nav={nav} setNav={setNav} />;
   return (
-    <>
+    <div className="tb-stack">
       {engineNotice}
       <Browse areas={areas} nav={nav} setNav={setNav} />
-    </>
+    </div>
   );
 }
 
@@ -166,6 +167,7 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
   }, [view, nav.collectionId]);
 
   const selected = collections.find((c) => c.id === nav.collectionId);
+  const total = areas.find((a) => a.id === nav.area)?.documents;
 
   const createDocument = async () => {
     setBusy(true);
@@ -211,7 +213,7 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
     try {
       const r = await run<{ documents: number }>("library_collection_delete", { id: selected.id });
       setDeleting(false);
-      setNotice(`Collection "${selected.name}" removed with ${r.documents} document${r.documents === 1 ? "" : "s"}.`);
+      setNotice(`Collection “${selected.name}” removed with ${r.documents} document${r.documents === 1 ? "" : "s"}.`);
       setNav({ collectionId: "" });
       loadCollections();
     } catch (e) {
@@ -223,67 +225,65 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
   };
 
   return (
-    <div>
-      <div className="kn-row">
-        <Field label="Memory area">
-          <Select
-            options={areas.map((a) => ({ value: a.id, label: a.label }))}
-            value={nav.area}
-            onChange={(event) => {
-              setNav({ area: event.target.value, collectionId: "" });
-              setQuery("");
-              setNotice(null);
-            }}
-          />
-        </Field>
+    <div className="tb-stack">
+      <div className="toolbar">
+        <div className="kn-area">
+          <Field label="Memory area">
+            <Select
+              options={areas.map((a) => ({ value: a.id, label: a.label }))}
+              value={nav.area}
+              onValueChange={(value) => {
+                setNav({ area: value, collectionId: "" });
+                setQuery("");
+                setNotice(null);
+              }}
+            />
+          </Field>
+        </div>
       </div>
       <ErrorNotice error={error} />
-      {notice ? <Notice tone="ok" role="status">{notice}</Notice> : null}
-      <div className="kn-split kn-section">
-        <nav className="kn-side" aria-label="Collections">
-          <div className="kn-row">
+      {notice ? <Notice tone="live">{notice}</Notice> : null}
+      <div className="kn-two">
+        <nav className="kn-pane" aria-label="Collections">
+          <div className="kn-pane-head">
             <strong>Collections</strong>
-            <Button size="sm" variant="secondary" onClick={() => setCreating(true)}>
+            <Button size="sm" onClick={() => setCreating(true)}>
               New collection
             </Button>
           </div>
-          <ul className="kn-list">
-            <li>
-              <button type="button" className="kn-pick" aria-pressed={!nav.collectionId} onClick={() => setNav({ collectionId: "" })}>
-                All documents
-              </button>
-            </li>
-            {collections.map((c) => (
-              <li key={c.id}>
-                <button type="button" className="kn-pick" aria-pressed={nav.collectionId === c.id} onClick={() => setNav({ collectionId: c.id })}>
-                  {c.name} <span className="kn-muted">({c.documentCount})</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <button type="button" className="kn-pick" aria-current={!nav.collectionId ? "true" : undefined} onClick={() => setNav({ collectionId: "" })}>
+            <span>All documents</span>
+            {total === undefined ? null : <span className="tb-hint">{total}</span>}
+          </button>
+          {collections.map((c) => (
+            <button key={c.id} type="button" className="kn-pick" aria-current={nav.collectionId === c.id ? "true" : undefined} onClick={() => setNav({ collectionId: c.id })}>
+              <span>{c.name}</span>
+              <span className="tb-hint">{c.documentCount}</span>
+            </button>
+          ))}
           {selected ? (
-            <div className="kn-section">
-              {selected.description ? <p className="kn-muted">{selected.description}</p> : null}
+            <div className="tb-stack kn-pane-foot">
+              {selected.description ? <p className="tb-hint">{selected.description}</p> : null}
               {selected.isDefault ? null : (
-                <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
-                  Remove collection
-                </Button>
+                <div>
+                  <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
+                    Remove collection
+                  </Button>
+                </div>
               )}
             </div>
           ) : null}
         </nav>
-        <section aria-label="Documents">
-          <div className="kn-row">
-            <Button size="sm" variant="secondary" onClick={() => setWriting(true)}>
-              New document
-            </Button>
-            <Field label="Search documents">
-              <TextInput type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Words from a title or body" />
-            </Field>
+        <section className="tb-stack" aria-label="Documents">
+          <div className="toolbar">
+            <div className="tb-search">
+              <SearchIcon />
+              <TextInput type="search" aria-label="Search documents" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Words from a title or body" />
+            </div>
             {nav.collectionId ? (
-              <Tabs
+              <Segmented
                 label="Document view"
-                tabs={[
+                options={[
                   { value: "list", label: "List" },
                   { value: "outline", label: "Outline" },
                 ]}
@@ -291,6 +291,9 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
                 onChange={setView}
               />
             ) : null}
+            <Button variant="primary" onClick={() => setWriting(true)}>
+              New document
+            </Button>
           </div>
           {view === "outline" && nav.collectionId ? (
             <Outline nodes={tree} onOpen={(id) => setNav({ documentId: id })} />
@@ -302,11 +305,12 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
       <Dialog
         open={writing}
         title="New document"
+        kicker="Library"
         onClose={() => setWriting(false)}
         busy={busy}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setWriting(false)} disabled={busy}>
+            <Button onClick={() => setWriting(false)} disabled={busy}>
               Cancel
             </Button>
             <Button variant="primary" onClick={() => void createDocument()} disabled={busy || !docTitle.trim()}>
@@ -315,21 +319,24 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
           </>
         }
       >
-        <Field label="Title">
-          <TextInput value={docTitle} onChange={(event) => setDocTitle(event.target.value)} maxLength={200} />
-        </Field>
-        <Field label="Text">
-          <textarea className="tb-textarea" rows={8} value={docBody} onChange={(event) => setDocBody(event.target.value)} />
-        </Field>
+        <div className="tb-stack">
+          <Field label="Title">
+            <TextInput value={docTitle} onChange={(event) => setDocTitle(event.target.value)} maxLength={200} />
+          </Field>
+          <Field label="Text">
+            <Textarea rows={8} value={docBody} onChange={(event) => setDocBody(event.target.value)} />
+          </Field>
+        </div>
       </Dialog>
       <Dialog
         open={creating}
         title="New collection"
+        kicker="Library"
         onClose={() => setCreating(false)}
         busy={busy}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCreating(false)} disabled={busy}>
+            <Button onClick={() => setCreating(false)} disabled={busy}>
               Cancel
             </Button>
             <Button variant="primary" onClick={() => void create()} disabled={busy || !name.trim()}>
@@ -338,12 +345,14 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
           </>
         }
       >
-        <Field label="Name">
-          <TextInput value={name} onChange={(event) => setName(event.target.value)} maxLength={120} />
-        </Field>
-        <Field label="Description (optional)">
-          <textarea className="tb-textarea" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
-        </Field>
+        <div className="tb-stack">
+          <Field label="Name">
+            <TextInput value={name} onChange={(event) => setName(event.target.value)} maxLength={120} />
+          </Field>
+          <Field label="Description (optional)">
+            <Textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
+          </Field>
+        </div>
       </Dialog>
       <ConfirmDelete
         open={deleting}
@@ -362,9 +371,9 @@ function Browse({ areas, nav, setNav }: { areas: { id: string; label: string; do
 }
 
 function DocList({ hits, loading, searching, onOpen }: { hits: Hit[]; loading: boolean; searching: boolean; onOpen: (id: string) => void }) {
-  if (!hits.length) return <p className="kn-muted kn-section">{loading ? "Loading…" : searching ? "No document matches this search." : "No documents here yet."}</p>;
+  if (!hits.length) return <p className="tb-soft">{loading ? "Loading documents." : searching ? "No document matches this search." : "No documents here yet."}</p>;
   return (
-    <table className="kn-table kn-section" aria-busy={loading}>
+    <Table className="kn-docs" aria-busy={loading}>
       <thead>
         <tr>
           <th>Title</th>
@@ -376,40 +385,42 @@ function DocList({ hits, loading, searching, onOpen }: { hits: Hit[]; loading: b
       <tbody>
         {hits.map((hit) => (
           <tr key={hit.id}>
-            <td>
-              <button type="button" className="kn-link" onClick={() => onOpen(hit.id)}>
+            <td className="strong">
+              <button type="button" className="tb-link" onClick={() => onOpen(hit.id)}>
                 {hit.title || "Untitled"}
               </button>
-              {hit.excerpt || hit.summary ? <div className="kn-muted kn-clip">{hit.excerpt || hit.summary}</div> : null}
+              {hit.excerpt || hit.summary ? <div className="tb-hint kn-clip">{hit.excerpt || hit.summary}</div> : null}
             </td>
             <td>
-              <Tag tone={statusTone(hit.status)}>{hit.status}</Tag>
+              <Tag status={statusTag(hit.status)}>{hit.status}</Tag>
             </td>
-            <td className="kn-row">
-              {hit.tags.map((tag) => (
-                <Tag key={tag} tone="neutral">
-                  {tag}
-                </Tag>
-              ))}
+            <td>
+              <span className="tb-row">
+                {hit.tags.map((tag) => (
+                  <Tag key={tag}>{tag}</Tag>
+                ))}
+              </span>
             </td>
-            <td>{when(hit.updatedAt)}</td>
+            <td className="num">{when(hit.updatedAt)}</td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
 function Outline({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (id: string) => void }) {
-  if (!nodes.length) return <p className="kn-muted kn-section">No documents in this collection yet.</p>;
+  if (!nodes.length) return <p className="tb-soft">No documents in this collection yet.</p>;
   return (
-    <ul className="kn-tree kn-section">
+    <ul className="kn-tree">
       {nodes.map((node) => (
         <li key={node.id}>
-          <button type="button" className="kn-link" onClick={() => onOpen(node.id)}>
-            {node.title || "Untitled"}
-          </button>{" "}
-          <Tag tone={statusTone(node.status)}>{node.status}</Tag>
+          <span className="tb-row">
+            <button type="button" className="tb-link" onClick={() => onOpen(node.id)}>
+              {node.title || "Untitled"}
+            </button>
+            <Tag status={statusTag(node.status)}>{node.status}</Tag>
+          </span>
           {node.children.length ? <Outline nodes={node.children} onOpen={onOpen} /> : null}
         </li>
       ))}
@@ -447,13 +458,13 @@ function DocumentView({ id, nav, setNav }: { id: string; nav: LibraryNav; setNav
     if (doc && (doc.area !== nav.area || doc.collectionId !== nav.collectionId)) setNav({ area: doc.area, collectionId: doc.collectionId });
   }, [doc, nav.area, nav.collectionId, setNav]);
 
-  const back = <Button size="sm" variant="secondary" onClick={() => setNav({ documentId: "" })}>Back to documents</Button>;
+  const back = <Button onClick={() => setNav({ documentId: "" })}>Back to documents</Button>;
   if (!data || !doc) {
     return (
-      <div>
-        <div className="kn-row">{back}</div>
+      <div className="tb-stack">
+        <div className="toolbar">{back}</div>
         <ErrorNotice error={error} />
-        {error ? null : <p className="kn-muted">Loading…</p>}
+        {error ? null : <Loading what="the document" />}
       </div>
     );
   }
@@ -479,8 +490,8 @@ function DocumentView({ id, nav, setNav }: { id: string; nav: LibraryNav; setNav
       setEditing(false);
       if (isConflict(e)) {
         setNotice(null);
-        setError("Someone else changed this document while you edited. Your change was not saved. The latest version is shown now.");
-        await load();
+        await load(); // a successful load clears the error, so the message is set after it
+        setError("Someone else changed this document while you edited. Your change wasn’t saved. The latest version is shown now.");
       } else setError(errText(e));
     } finally {
       setBusy(false);
@@ -516,71 +527,85 @@ function DocumentView({ id, nav, setNav }: { id: string; nav: LibraryNav; setNav
   };
 
   return (
-    <article>
-      <div className="kn-row">
+    <article className="tb-stack">
+      <div className="toolbar">
         {back}
-        <Button size="sm" variant="primary" onClick={() => setEditing(true)}>
+        <Button variant="primary" onClick={() => setEditing(true)}>
           Edit
         </Button>
-        <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
+        <Button variant="danger" onClick={() => setDeleting(true)}>
           Remove
         </Button>
       </div>
       <ErrorNotice error={error} />
-      {notice ? <Notice tone="ok" role="status">{notice}</Notice> : null}
+      {notice ? <Notice tone="live">{notice}</Notice> : null}
       <h2 className="kn-title">{doc.title || "Untitled"}</h2>
-      <div className="kn-row">
-        <Tag tone={statusTone(doc.status)}>{doc.status}</Tag>
+      <div className="tb-row">
+        <Tag status={statusTag(doc.status)}>{doc.status}</Tag>
         {doc.tags.map((tag) => (
-          <Tag key={tag} tone="neutral">
-            {tag}
-          </Tag>
+          <Tag key={tag}>{tag}</Tag>
         ))}
-        <span className="kn-muted">
+        <span className="tb-hint">
           Version {doc.version}, updated {when(doc.updatedAt)} by {doc.updatedBy}
         </span>
       </div>
-      {doc.summary ? <p>{doc.summary}</p> : null}
+      {doc.summary ? <p className="tb-soft">{doc.summary}</p> : null}
       <TextBlock text={doc.body} label="Document text" />
 
-      <h3 className="kn-section">History</h3>
-      {data.revisions.length ? (
-        <ul className="kn-list">
-          {data.revisions.map((rev) => (
-            <li key={rev.version}>
-              <button type="button" className="kn-link" onClick={() => void openRevision(rev.version)}>
-                Version {rev.version}
-              </button>{" "}
-              <span className="kn-muted">
-                {rev.title || "Untitled"}, {when(rev.createdAt)} by {rev.createdBy}
+      <Section title="History" first>
+        {data.revisions.length ? (
+          <Table>
+            <thead>
+              <tr>
+                <th>Version</th>
+                <th>Title</th>
+                <th>By</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.revisions.map((rev) => (
+                <tr key={rev.version}>
+                  <td className="strong">
+                    <button type="button" className="tb-link" onClick={() => void openRevision(rev.version)}>
+                      Version {rev.version}
+                    </button>
+                  </td>
+                  <td>{rev.title || "Untitled"}</td>
+                  <td>{rev.createdBy}</td>
+                  <td className="num">{when(rev.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <p className="tb-soft">No earlier versions.</p>
+        )}
+        {revision ? (
+          <Card as="section" className="kn-revision" aria-label={`Version ${revision.version}`}>
+            <div className="tb-row kn-between">
+              <strong>
+                Version {revision.version} (read only): {revision.title || "Untitled"}
+              </strong>
+              <span className="tb-row">
+                <Tag status={statusTag(revision.status)}>{revision.status}</Tag>
+                <Button size="sm" variant="quiet" onClick={() => setRevision(null)}>
+                  Close version
+                </Button>
               </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="kn-muted">No earlier versions.</p>
-      )}
-      {revision ? (
-        <div className="kn-revision">
-          <div className="kn-row">
-            <strong>
-              Version {revision.version} (read only): {revision.title || "Untitled"}
-            </strong>
-            <Tag tone={statusTone(revision.status)}>{revision.status}</Tag>
-            <Button size="sm" variant="ghost" onClick={() => setRevision(null)}>
-              Close version
-            </Button>
-          </div>
-          {revision.summary ? <p>{revision.summary}</p> : null}
-          <TextBlock text={revision.body} label={`Text of version ${revision.version}`} />
-        </div>
-      ) : null}
+            </div>
+            {revision.summary ? <p className="tb-soft">{revision.summary}</p> : null}
+            <TextBlock text={revision.body} label={`Text of version ${revision.version}`} />
+          </Card>
+        ) : null}
+      </Section>
 
-      <h3 className="kn-section">Links</h3>
-      <div className="kn-links">
-        <LinkList heading="Links to" links={data.links.outbound} onOpen={(docId) => setNav({ documentId: docId })} onDelete={setLinkToDelete} />
-        <LinkList heading="Linked from" links={data.links.backlinks} onOpen={(docId) => setNav({ documentId: docId })} onDelete={setLinkToDelete} />
-      </div>
+      <Section title="Links">
+        <div className="kn-links">
+          <LinkList heading="Links to" links={data.links.outbound} onOpen={(docId) => setNav({ documentId: docId })} onDelete={setLinkToDelete} />
+          <LinkList heading="Linked from" links={data.links.backlinks} onOpen={(docId) => setNav({ documentId: docId })} onDelete={setLinkToDelete} />
+        </div>
+      </Section>
 
       <Comments documentId={id} comments={data.comments} onChanged={load} onError={setError} />
 
@@ -615,24 +640,24 @@ function DocumentView({ id, nav, setNav }: { id: string; nav: LibraryNav; setNav
 
 function LinkList({ heading, links, onOpen, onDelete }: { heading: string; links: DocLink[]; onOpen: (id: string) => void; onDelete: (link: DocLink) => void }) {
   return (
-    <div>
-      <strong>{heading}</strong>
+    <div className="tb-stack">
+      <h3 className="kn-sub">{heading}</h3>
       {links.length ? (
-        <ul className="kn-list">
+        <ul className="kn-rows">
           {links.map((link) => (
-            <li key={link.id} className="kn-row">
-              <button type="button" className="kn-link" onClick={() => onOpen(link.documentId)}>
+            <li key={link.id} className="kn-row-item">
+              <button type="button" className="tb-link" onClick={() => onOpen(link.documentId)}>
                 {link.title || "Untitled"}
               </button>
-              <Tag tone="neutral">{link.type}</Tag>
-              <Button size="sm" variant="ghost" aria-label={`Remove link to ${link.title || "Untitled"}`} onClick={() => onDelete(link)}>
+              <Tag>{link.type}</Tag>
+              <Button size="sm" variant="quiet" aria-label={`Remove link to ${link.title || "Untitled"}`} onClick={() => onDelete(link)}>
                 Remove link
               </Button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="kn-muted">None.</p>
+        <p className="tb-hint">None.</p>
       )}
     </div>
   );
@@ -662,36 +687,39 @@ function Comments({ documentId, comments, onChanged, onError }: { documentId: st
 
   const render = (parent: string | null, depth: number) =>
     childrenOf(parent).map((c) => (
-      <li key={c.id} className="kn-comment" style={{ marginLeft: Math.min(depth, 4) * 20 }}>
-        <div className="kn-muted">
+      <li key={c.id} className="kn-comment" style={{ "--depth": Math.min(depth, 4) } as CSSProperties}>
+        <div className="tb-hint">
           {c.createdBy}, {when(c.createdAt)}
         </div>
         <p className="kn-wrap">{c.body}</p>
-        <Button size="sm" variant="ghost" onClick={() => setReplyTo(c)}>
-          Reply
-        </Button>
+        <div>
+          <Button size="sm" variant="quiet" onClick={() => setReplyTo(c)}>
+            Reply
+          </Button>
+        </div>
         {render(c.id, depth + 1)}
       </li>
     ));
 
   return (
-    <section aria-label="Comments">
-      <h3 className="kn-section">Comments</h3>
-      {comments.length ? <ul className="kn-list">{render(null, 0)}</ul> : <p className="kn-muted">No comments yet.</p>}
-      <Field label={replyTo ? `Reply to ${replyTo.createdBy}` : "Add a comment"}>
-        <textarea className="tb-textarea" rows={3} value={body} onChange={(event) => setBody(event.target.value)} />
-      </Field>
-      <div className="kn-row">
-        <Button variant="primary" onClick={() => void add()} disabled={busy || !body.trim()}>
-          {busy ? "Saving…" : replyTo ? "Post reply" : "Post comment"}
-        </Button>
-        {replyTo ? (
-          <Button variant="ghost" onClick={() => setReplyTo(null)}>
-            Cancel reply
+    <Section title="Comments">
+      <section className="tb-stack" aria-label="Comments">
+        {comments.length ? <ul className="kn-rows">{render(null, 0)}</ul> : <p className="tb-soft">No comments yet.</p>}
+        <Field label={replyTo ? `Reply to ${replyTo.createdBy}` : "Add a comment"}>
+          <Textarea rows={3} value={body} onChange={(event) => setBody(event.target.value)} />
+        </Field>
+        <div className="tb-ctas">
+          <Button onClick={() => void add()} disabled={busy || !body.trim()}>
+            {busy ? "Saving…" : replyTo ? "Post reply" : "Post comment"}
           </Button>
-        ) : null}
-      </div>
-    </section>
+          {replyTo ? (
+            <Button variant="quiet" onClick={() => setReplyTo(null)}>
+              Cancel reply
+            </Button>
+          ) : null}
+        </div>
+      </section>
+    </Section>
   );
 }
 
@@ -725,12 +753,13 @@ function EditDialog({
     <Dialog
       open={open}
       title="Edit document"
+      kicker="Library"
       size="lg"
       onClose={onClose}
       busy={busy}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
+          <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button
@@ -743,21 +772,23 @@ function EditDialog({
         </>
       }
     >
-      <Field label="Title">
-        <TextInput value={title} onChange={(event) => setTitle(event.target.value)} />
-      </Field>
-      <Field label="Summary">
-        <textarea className="tb-textarea" rows={2} value={summary} onChange={(event) => setSummary(event.target.value)} />
-      </Field>
-      <Field label="Text">
-        <textarea className="tb-textarea kn-mono" rows={12} value={body} onChange={(event) => setBody(event.target.value)} />
-      </Field>
-      <Field label="Status">
-        <Select options={STATUS_OPTIONS} value={status} onChange={(event) => setStatus(event.target.value as Status)} />
-      </Field>
-      <Field label="Tags" hint="Separate tags with commas.">
-        <TextInput value={tags} onChange={(event) => setTags(event.target.value)} />
-      </Field>
+      <div className="tb-stack">
+        <Field label="Title">
+          <TextInput value={title} onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <Field label="Summary">
+          <Textarea rows={2} value={summary} onChange={(event) => setSummary(event.target.value)} />
+        </Field>
+        <Field label="Text">
+          <Textarea className="kn-mono" rows={12} value={body} onChange={(event) => setBody(event.target.value)} />
+        </Field>
+        <Field label="Status">
+          <Select options={STATUS_OPTIONS} value={status} onValueChange={(value) => setStatus(value as Status)} />
+        </Field>
+        <Field label="Tags" hint="Separate tags with commas.">
+          <TextInput value={tags} onChange={(event) => setTags(event.target.value)} />
+        </Field>
+      </div>
     </Dialog>
   );
 }

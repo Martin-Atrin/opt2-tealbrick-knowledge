@@ -1,9 +1,9 @@
 {
   "name": "opt2-tealbrick-knowledge",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "Teal Brick Knowledge miniapp (opt2): canonical documents and walled memory areas over pinned upstream engines.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check .",
+    "lint": "biome check . && check-system src",
     "test": "node --test 'test/**/*.test.ts'",
     "conformance": "mkdir -p .conformance && chmod 0777 .conformance && TBCONF_STUB_ENGINE=1 tb-conformance app --start conformance.start.ts --manifest tealbrick.manifest.json --report .conformance/report",
     "build": "tsc -p tsconfig.build.json && node scripts/build-ui.ts",
@@ -25,10 +25,11 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@opt2-tealbrick/conformance": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/conformance-v0.1.14/opt2-tealbrick-conformance-0.1.14.tgz",
-    "@opt2-tealbrick/ui": "https://github.com/Martin-Atrin/opt2-tealbrick-packages/releases/download/ui-v0.1.1/opt2-tealbrick-ui-0.1.1.tgz",
+    "@opt2-tealbrick/ui": "https://github.com/Martin-Atrin/opt2-tealbrick-packages/releases/download/ui-v0.2.0/opt2-tealbrick-ui-0.2.0.tgz",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "happy-dom": "21.0.1",
     "postgres": "3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

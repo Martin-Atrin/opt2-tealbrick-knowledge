@@ -1,6 +1,6 @@
 // Shared helpers for the owner pages (Library, Recall, Research): error text, debounce, op calls, delete confirmation.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, Dialog, Notice } from "@opt2-tealbrick/ui";
+import { Button, Dialog, Notice, type Status as TagStatus } from "@opt2-tealbrick/ui";
 import { type ReactNode, useEffect, useState } from "react";
 
 export type Status = "draft" | "published" | "archived";
@@ -35,16 +35,30 @@ export function useDebounced<T>(value: T, ms = 300): T {
 
 export function ErrorNotice({ error }: { error: string | null }) {
   return error ? (
-    <Notice tone="action" role="alert">
+    <Notice tone="needs-you" role="alert">
       {error}
     </Notice>
   ) : null;
 }
 
-export const when = (ms: number | string | null | undefined) => (ms ? new Date(ms).toLocaleString() : "");
+export function Loading({ what }: { what: string }) {
+  return (
+    <p className="tb-soft" role="status">
+      Loading {what}.
+    </p>
+  );
+}
 
-export function statusTone(status: string) {
-  return status === "published" ? "ok" : status === "draft" ? "progress" : "neutral";
+/** "14 Oct 2026, 10:00" in the owner's locale. */
+export const when = (ms: number | string | null | undefined) => {
+  if (!ms) return "";
+  const d = new Date(ms);
+  return `${d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+/** Document status as a kit Tag status: published = live, draft = busy, archived = plain. */
+export function statusTag(status: string): TagStatus {
+  return status === "published" ? "live" : status === "draft" ? "busy" : "default";
 }
 
 /** Confirmation before any delete. `what` completes "This removes ...". */
@@ -71,7 +85,7 @@ export function ConfirmDelete({
       busy={busy}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
+          <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button variant="danger" onClick={onConfirm} disabled={busy}>
@@ -80,9 +94,7 @@ export function ConfirmDelete({
         </>
       }
     >
-      <p>
-        This removes {what} from memory search. It cannot be undone from here.
-      </p>
+      <p>This removes {what} from memory search. You can’t undo this here.</p>
     </Dialog>
   );
 }
@@ -91,7 +103,7 @@ export function ConfirmDelete({
 export function TextBlock({ text, label }: { text: string; label: string }) {
   return (
     <section aria-label={label}>
-      <pre className="kn-pre">{text}</pre>
+      <pre className="kn-text">{text}</pre>
     </section>
   );
 }
@@ -126,4 +138,14 @@ export function useOverview() {
       .catch((e: unknown) => setError(errText(e)));
   }, []);
   return { areas, engine, error };
+}
+
+/** Page heading of the app's own pages (the standard pages draw the same one). */
+export function PageHead({ title, lede }: { title: string; lede?: ReactNode }) {
+  return (
+    <div className="page-head">
+      <h1>{title}</h1>
+      {lede ? <p className="tb-lede">{lede}</p> : null}
+    </div>
+  );
 }

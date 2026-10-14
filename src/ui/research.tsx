@@ -1,7 +1,7 @@
 // Research page: per area, the sources and notes held by the research engine. Read, and remove sources.
-import { Button, Field, Notice, Select, Tag } from "@opt2-tealbrick/ui";
+import { Button, Card, Field, Notice, Select, Tag } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useState } from "react";
-import { ConfirmDelete, ErrorNotice, errText, run, TextBlock, useOverview, when } from "./common.tsx";
+import { ConfirmDelete, ErrorNotice, errText, Loading, run, TextBlock, useOverview, when } from "./common.tsx";
 
 interface ResearchResponse {
   enabled: boolean;
@@ -69,65 +69,66 @@ export function Research() {
   };
 
   return (
-    <div>
-      <Field label="Memory area">
-        <Select options={(areas ?? []).map((a) => ({ value: a.id, label: a.label }))} value={area} onChange={(event) => setArea(event.target.value)} />
-      </Field>
+    <div className="tb-stack">
+      <div className="toolbar">
+        <div className="kn-area">
+          <Field label="Research area">
+            <Select options={(areas ?? []).map((a) => ({ value: a.id, label: a.label }))} value={area} onValueChange={setArea} />
+          </Field>
+        </div>
+      </div>
       <ErrorNotice error={overviewError ?? error} />
-      {data && !data.enabled ? <Notice tone="action">Research is not set up for this area.</Notice> : null}
+      {area && !overviewError && !data && !error ? <Loading what="research" /> : null}
+      {data && !data.enabled ? <Notice tone="needs-you">Research isn’t set up for this area.</Notice> : null}
       {data?.enabled ? (
-        <div className="kn-split kn-section">
-          <div>
-            <h3>Sources</h3>
+        <div className="kn-two">
+          <nav className="kn-pane" aria-label="Sources and notes">
+            <h3 className="kn-sub">Sources</h3>
             {data.sources.length ? (
-              <ul className="kn-list">
-                {data.sources.map((s) => (
-                  <li key={s.id} className="kn-row">
-                    <button type="button" className="kn-link" onClick={() => void open("source", s.id)}>
-                      {s.title || "Untitled"}
-                    </button>
-                    <span className="kn-muted">{when(s.updated)}</span>
-                    <Button size="sm" variant="ghost" aria-label={`Remove source ${s.title || "Untitled"}`} onClick={() => setToDelete({ id: s.id, title: s.title })}>
-                      Remove
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              data.sources.map((s) => (
+                <div key={s.id} className="kn-pick-row">
+                  <button type="button" className="kn-pick" aria-current={item?.kind === "source" && item.value.id === s.id ? "true" : undefined} onClick={() => void open("source", s.id)}>
+                    <span>{s.title || "Untitled"}</span>
+                    <span className="tb-hint">{when(s.updated)}</span>
+                  </button>
+                  <Button size="sm" variant="quiet" aria-label={`Remove source ${s.title || "Untitled"}`} onClick={() => setToDelete({ id: s.id, title: s.title })}>
+                    Remove
+                  </Button>
+                </div>
+              ))
             ) : (
-              <p className="kn-muted">No sources yet.</p>
+              <p className="tb-hint kn-pane-note">No sources yet.</p>
             )}
-            <h3 className="kn-section">Notes</h3>
+            <h3 className="kn-sub">Notes</h3>
             {data.notes.length ? (
-              <ul className="kn-list">
-                {data.notes.map((n) => (
-                  <li key={n.id} className="kn-row">
-                    <button type="button" className="kn-link" onClick={() => void open("note", n.id)}>
-                      {n.title || "Untitled"}
-                    </button>
-                    <Tag tone="neutral">{n.noteType}</Tag>
-                    <span className="kn-muted">{when(n.updated)}</span>
-                  </li>
-                ))}
-              </ul>
+              data.notes.map((n) => (
+                <button key={n.id} type="button" className="kn-pick" aria-current={item?.kind === "note" && item.value.id === n.id ? "true" : undefined} onClick={() => void open("note", n.id)}>
+                  <span>
+                    {n.title || "Untitled"} <Tag>{n.noteType}</Tag>
+                  </span>
+                  <span className="tb-hint">{when(n.updated)}</span>
+                </button>
+              ))
             ) : (
-              <p className="kn-muted">No notes yet.</p>
+              <p className="tb-hint kn-pane-note">No notes yet.</p>
             )}
-          </div>
+          </nav>
           <section aria-label="Selected item">
             {item ? (
-              <div>
-                <div className="kn-row">
-                  <strong>{item.value.title || "Untitled"}</strong>
-                  <Tag tone="neutral">{item.kind}</Tag>
-                  <Button size="sm" variant="ghost" onClick={() => setItem(null)}>
+              <Card as="article" className="tb-stack">
+                <div className="tb-row kn-between">
+                  <h2 className="kn-sub-title">
+                    {item.value.title || "Untitled"} <Tag>{item.kind}</Tag>
+                  </h2>
+                  <Button size="sm" variant="quiet" onClick={() => setItem(null)}>
                     Close
                   </Button>
                 </div>
-                <p className="kn-muted">Updated {when(item.value.updated)}</p>
+                <p className="tb-hint">Updated {when(item.value.updated)}</p>
                 <TextBlock text={itemText(item.value)} label={`Text of ${item.kind}`} />
-              </div>
+              </Card>
             ) : (
-              <p className="kn-muted">Choose a source or a note to read it.</p>
+              <p className="tb-soft">Choose a source or a note to read it.</p>
             )}
           </section>
         </div>
