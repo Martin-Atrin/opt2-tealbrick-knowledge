@@ -72,6 +72,8 @@ export interface Attention {
 
 /** Engine probe interval: one cheap one-row query on the company area (embeds a 4-word query when embeddings work). */
 export const ENGINE_PROBE_MS = 10 * 60_000;
+/** QA R-2: attention code when the provider refuses the engine's embedding calls (the key is set but rejected). */
+export const KEY_REJECTED = "memory_engine_key_rejected";
 
 export interface KnowledgeOptions {
   fetch?: typeof fetch;
@@ -163,6 +165,14 @@ export class Knowledge {
     const { state, detail } = this.engineHealth;
     const list = detail.join(", ").slice(0, 80);
     if (state === "degraded") {
+      // QA R-2: the key is set but the provider refuses the embedding calls (qa1: a 401 surfaces as provider_error, the
+      // engine's closed vocabulary has no finer code). The Keys page reads this same attention, so both screens agree.
+      if (detail.some((d) => d.startsWith("embed") && d.endsWith(":provider_error"))) {
+        return {
+          code: KEY_REJECTED,
+          reason: `Key rejected by the provider: the memory engine’s embedding calls fail (${list}), so recall is keyword-only. Enter a valid model key on the bridge key page.`.slice(0, 200),
+        };
+      }
       const embeddings = detail.some((d) => d.startsWith("embed") || d.startsWith("keyword_only") || d.includes("no_provider") || d.includes("provider_error") || d.includes("no_key"));
       return {
         code: "memory_engine_degraded",

@@ -4,7 +4,7 @@ import { callOp, TbProvider, useScopes, useSession } from "@opt2-tealbrick/minia
 import { AppShell, appArt, appColour, Button, Field, Notice, Select, STANDARD_PAGES, Table, Tabs, Tag } from "@opt2-tealbrick/ui";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ErrorNotice, errText, PageHead } from "./common.tsx";
+import { ErrorNotice, errText, PageHead, useOverview } from "./common.tsx";
 import { Library, type LibraryNav } from "./library.tsx";
 import { Recall } from "./recall.tsx";
 import { Research } from "./research.tsx";
@@ -196,6 +196,9 @@ interface KeyRow {
   source: string | null;
 }
 
+/** QA R-2: the server attention code for a set key the provider refuses (src/knowledge.ts KEY_REJECTED). */
+const KEY_REJECTED_CODE = "memory_engine_key_rejected";
+
 /** Model keys: whether each is set, never its value (entered on the bridge key page). */
 function Keys() {
   const [keys, setKeys] = useState<KeyRow[] | null>(null);
@@ -207,10 +210,14 @@ function Keys() {
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
+  // QA R-2: the same engine health as the Library notice and the app status; a set key the provider refuses is not "present".
+  const { engine } = useOverview();
+  const rejected = engine?.attention?.code === KEY_REJECTED_CODE ? engine.attention : null;
   return (
     <section className="app-page" aria-label="Keys">
       <PageHead title="Keys" />
       <p className="tb-soft kn-measure">Model keys are entered on the bridge key page (open it from Portal). Knowledge never shows key values.</p>
+      {rejected ? <Notice tone="needs-you">{rejected.reason}</Notice> : null}
       {error ? <LoadError message={error} onRetry={load} /> : null}
       {keys === null ? (
         error ? null : (
@@ -224,7 +231,17 @@ function Keys() {
             {keys.map((key) => (
               <tr key={key.name}>
                 <td className="mono">{key.name}</td>
-                <td>{key.present ? <Tag status="live">present</Tag> : key.required ? <Tag status="needs-you">needed</Tag> : <Tag>not needed</Tag>}</td>
+                <td>
+                  {key.present && key.required && rejected ? (
+                    <Tag status="needs-you">rejected by provider</Tag>
+                  ) : key.present ? (
+                    <Tag status="live">present</Tag>
+                  ) : key.required ? (
+                    <Tag status="needs-you">needed</Tag>
+                  ) : (
+                    <Tag>not needed</Tag>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

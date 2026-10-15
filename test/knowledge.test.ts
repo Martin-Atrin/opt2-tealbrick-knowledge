@@ -8,7 +8,7 @@ import type { Json, OpContext } from "@opt2-tealbrick/spec/sdk";
 import { knowledgeDefinition } from "../src/app.ts";
 import { NARROWING_POLICY } from "../src/handlers.ts";
 import { areaSourceId } from "../src/ids.ts";
-import { memorySecrets, SECRET_NAME } from "../src/knowledge.ts";
+import { KEY_REJECTED, memorySecrets, SECRET_NAME } from "../src/knowledge.ts";
 import { context, type FakeGBrain, FakeScopes, fakeGBrain, memoryDb, TestError } from "./helpers.ts";
 
 const ADA = "agt_01AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -575,4 +575,15 @@ test("F89: the engine probe reports a degraded engine through attention and push
   const owner = ctx(ADA, { caller: { type: "person", id: "per_01OWNER000000000000000000" as `per_${string}`, name: "Owner", mode: null } });
   const overview = await run("library_overview", {}, owner);
   assert.equal(overview.engine.state, "ok");
+});
+
+test("R-2: a provider_error on the embedding stage reads as a rejected key (fires); other degraded stages keep the generic reason (quiet)", async () => {
+  const { knowledge } = await taggedMemories();
+  knowledge.noteEngine({ state: "degraded", detail: ["embed_unavailable:provider_error"] });
+  assert.equal(knowledge.attention()?.code, KEY_REJECTED);
+  assert.match(knowledge.attention()?.reason ?? "", /^Key rejected by the provider: .*embed_unavailable:provider_error.*Enter a valid model key on the bridge key page\.$/u);
+  knowledge.noteEngine({ state: "degraded", detail: ["embed_unavailable:no_provider"] });
+  assert.equal(knowledge.attention()?.code, "memory_engine_degraded");
+  knowledge.noteEngine({ state: "ok", detail: [] });
+  assert.equal(knowledge.attention(), null);
 });
