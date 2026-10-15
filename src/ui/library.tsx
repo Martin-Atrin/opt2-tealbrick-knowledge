@@ -1,7 +1,7 @@
 // Library page: area -> collection -> document. Navigation state lives in App so Recall and Research can open a document here.
 import { Button, Card, Dialog, Field, Notice, SearchIcon, Section, Segmented, Select, Table, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
-import { ConfirmDelete, ErrorNotice, errText, isConflict, Loading, run, type Status, statusTag, TextBlock, useDebounced, useOverview, when } from "./common.tsx";
+import { ConfirmDelete, ErrorNotice, errText, isConflict, Loading, run, type Status, statusTag, TextBlock, useDebounced, useOverview, when, whenShort } from "./common.tsx";
 
 /** Empty string means "not chosen". */
 export interface LibraryNav {
@@ -401,7 +401,7 @@ function DocList({ hits, loading, searching, onOpen }: { hits: Hit[]; loading: b
                 ))}
               </span>
             </td>
-            <td className="num">{when(hit.updatedAt)}</td>
+            <td className="num">{whenShort(hit.updatedAt)}</td>
           </tr>
         ))}
       </tbody>

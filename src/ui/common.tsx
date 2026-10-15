@@ -49,11 +49,34 @@ export function Loading({ what }: { what: string }) {
   );
 }
 
-/** "14 Oct 2026, 10:00" in the owner's locale. */
-export const when = (ms: number | string | null | undefined) => {
-  if (!ms) return "";
+// Dates in the one form of the approved mockups (C185 D5): British order, 24-hour clock, the same for every owner.
+// A fixed month list, because Intl en-GB writes "Sept" where the mockups show "Sep".
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const toDate = (ms: number | string | null | undefined): Date | null => {
+  if (!ms) return null;
   const d = new Date(ms);
-  return `${d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const pad = (n: number) => String(n).padStart(2, "0");
+const day = (d: Date) => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+const clock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/** "10 Oct" (a list hint). */
+export const dayMonth = (ms: number | string | null | undefined) => {
+  const d = toDate(ms);
+  return d ? day(d) : "";
+};
+
+/** "13 Oct, 09:12" (a table cell). */
+export const whenShort = (ms: number | string | null | undefined) => {
+  const d = toDate(ms);
+  return d ? `${day(d)}, ${clock(d)}` : "";
+};
+
+/** "14 Oct 2026, 10:00". */
+export const when = (ms: number | string | null | undefined) => {
+  const d = toDate(ms);
+  return d ? `${day(d)} ${d.getFullYear()}, ${clock(d)}` : "";
 };
 
 /** Document status as a kit Tag status: published = live, draft = busy, archived = plain. */

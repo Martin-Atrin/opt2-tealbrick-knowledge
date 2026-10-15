@@ -8,7 +8,12 @@
 .kn-pane-foot { padding-top: var(--tb-s3); }
 .kn-pane-note { padding: 0 var(--tb-s3); }
 .kn-sub { font-size: var(--tb-text-label); font-weight: var(--tb-weight-label); line-height: var(--tb-leading-control); padding: var(--tb-s3) 0 var(--tb-s1); }
-.kn-sub-title { font-size: var(--tb-text-title); font-weight: var(--tb-weight-head); overflow-wrap: anywhere; }
+/* pane labels ("Sources", "Notes"): the same plain bold label as "Collections". `.kn-pane >` beats the kit's `.tb-root h3`. */
+.kn-pane > .kn-sub { font-size: var(--tb-text-body); font-weight: var(--tb-weight-label); line-height: var(--tb-s6); letter-spacing: 0; padding: var(--tb-s3) 0 var(--tb-s1); }
+.kn-pane > .kn-sub:first-child { padding-top: 0; }
+/* the open source or note: mockup title 22px (no token: title 20px + 2px), beats the kit's `.tb-root h2` */
+.tb-root .kn-sub-title { font-size: calc(var(--tb-text-title) + var(--tb-s1) / 2); font-weight: var(--tb-weight-head); overflow-wrap: anywhere; }
+.kn-detail { display: grid; gap: calc((var(--tb-s2) + var(--tb-s3)) / 2); } /* mockup 10px */
 
 /* a pane row: brick, current = ink ring */
 .kn-pick { box-sizing: border-box; display: flex; align-items: baseline; justify-content: space-between; gap: var(--tb-s2); width: 100%; min-height: var(--tb-target); padding: 10px var(--tb-s3); border: 0; border-radius: var(--tb-radius-brick); background: transparent; color: var(--tb-ink); font: inherit; font-weight: var(--tb-weight-nav); text-align: left; cursor: pointer; overflow-wrap: anywhere; flex-wrap: wrap; }
@@ -22,8 +27,12 @@
 .kn-area { width: min(100%, 260px); }
 .kn-grow { flex: 1; min-width: 220px; }
 .kn-form { align-items: flex-end; }
-.kn-recall { max-width: 920px; }
-.kn-cell { min-width: 200px; display: flex; justify-content: flex-end; }
+.kn-recall { max-width: calc(var(--tb-s16) * 11 + var(--tb-s4)); } /* mockup 720px, no token */
+.kn-cell { min-width: calc(var(--tb-s16) * 2 + var(--tb-s8)); display: flex; justify-content: flex-end; } /* 160px = the kit Select minimum */
+.kn-cell > .tb-field { width: 100%; }
+/* labels wrap to different line counts per cell: bottom-align so every Select sits on a whole pixel (C128) and the row lines up */
+.tb-table td.kn-access { vertical-align: bottom; }
+.kn-measure { max-width: var(--tb-measure); }
 .kn-between { justify-content: space-between; }
 
 /* document view */
@@ -38,10 +47,9 @@
 .kn-comment { display: grid; gap: var(--tb-s1); padding: var(--tb-s3) 0; margin-inline-start: calc(var(--depth, 0) * var(--tb-s5)); }
 .kn-wrap { overflow-wrap: anywhere; white-space: pre-wrap; }
 .tb-table td .tb-link { text-align: left; }
-.kn-clip { font-weight: var(--tb-weight-body); display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kn-clip { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .kn-tree { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--tb-s2); }
 .kn-tree .kn-tree { padding-inline-start: var(--tb-s5); margin-top: var(--tb-s2); }
 
-.kn-docs th:first-child, .kn-docs td:first-child { min-width: 14rem; }
 
 @media (max-width: 960px) { .kn-two { grid-template-columns: 1fr; } }

@@ -1,7 +1,7 @@
 // Knowledge person UI inside the ONE app shell (@opt2-tealbrick/ui AppShell): Memory (Library, Recall, Memory status),
 // Research, then the standard pages (Holds, Receipts, Agents & scopes, Backups & export, from ./standard.tsx) and Keys.
 import { callOp, TbProvider, useScopes, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
-import { AppShell, appArt, appColour, Button, Notice, Select, STANDARD_PAGES, Table, Tabs, Tag } from "@opt2-tealbrick/ui";
+import { AppShell, appArt, appColour, Button, Field, Notice, Select, STANDARD_PAGES, Table, Tabs, Tag } from "@opt2-tealbrick/ui";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ErrorNotice, errText, PageHead } from "./common.tsx";
@@ -120,15 +120,16 @@ function Configure({ agents, areas }: { agents: readonly Agent[]; areas: Areas }
                 </span>
               </td>
               {columns.map((area) => (
-                <td key={area.id}>
+                <td key={area.id} className="kn-access">
                   <div className="kn-cell">
-                    <Select
-                      aria-label={`${agent.name} access to ${area.label}`}
-                      options={ACCESS_OPTIONS}
-                      value={level(agent.id, area.id)}
-                      disabled={busy === `${agent.id}|${area.id}`}
-                      onValueChange={(value) => void change(agent.id, area.id, value)}
-                    />
+                    <Field label={`${agent.name} access to ${area.label}`}>
+                      <Select
+                        options={ACCESS_OPTIONS}
+                        value={level(agent.id, area.id)}
+                        disabled={busy === `${agent.id}|${area.id}`}
+                        onValueChange={(value) => void change(agent.id, area.id, value)}
+                      />
+                    </Field>
                   </div>
                 </td>
               ))}
@@ -209,7 +210,7 @@ function Keys() {
   return (
     <section className="app-page" aria-label="Keys">
       <PageHead title="Keys" />
-      <p className="tb-soft">Model keys are entered on the bridge key page (open it from Portal). Knowledge never shows key values.</p>
+      <p className="tb-soft kn-measure">Model keys are entered on the bridge key page (open it from Portal). Knowledge never shows key values.</p>
       {error ? <LoadError message={error} onRetry={load} /> : null}
       {keys === null ? (
         error ? null : (

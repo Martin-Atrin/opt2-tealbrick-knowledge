@@ -1,7 +1,7 @@
 // Research page: per area, the sources and notes held by the research engine. Read, and remove sources.
 import { Button, Card, Field, Notice, Select, Tag } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useState } from "react";
-import { ConfirmDelete, ErrorNotice, errText, Loading, run, TextBlock, useOverview, when } from "./common.tsx";
+import { ConfirmDelete, dayMonth, ErrorNotice, errText, Loading, run, useOverview, when } from "./common.tsx";
 
 interface ResearchResponse {
   enabled: boolean;
@@ -89,7 +89,7 @@ export function Research() {
                 <div key={s.id} className="kn-pick-row">
                   <button type="button" className="kn-pick" aria-current={item?.kind === "source" && item.value.id === s.id ? "true" : undefined} onClick={() => void open("source", s.id)}>
                     <span>{s.title || "Untitled"}</span>
-                    <span className="tb-hint">{when(s.updated)}</span>
+                    <span className="tb-hint">{dayMonth(s.updated)}</span>
                   </button>
                   <Button size="sm" variant="quiet" aria-label={`Remove source ${s.title || "Untitled"}`} onClick={() => setToDelete({ id: s.id, title: s.title })}>
                     Remove
@@ -103,10 +103,8 @@ export function Research() {
             {data.notes.length ? (
               data.notes.map((n) => (
                 <button key={n.id} type="button" className="kn-pick" aria-current={item?.kind === "note" && item.value.id === n.id ? "true" : undefined} onClick={() => void open("note", n.id)}>
-                  <span>
-                    {n.title || "Untitled"} <Tag>{n.noteType}</Tag>
-                  </span>
-                  <span className="tb-hint">{when(n.updated)}</span>
+                  <span>{n.title || "Untitled"}</span>
+                  <Tag>{n.noteType}</Tag>
                 </button>
               ))
             ) : (
@@ -115,7 +113,7 @@ export function Research() {
           </nav>
           <section aria-label="Selected item">
             {item ? (
-              <Card as="article" className="tb-stack">
+              <Card as="article" className="kn-detail">
                 <div className="tb-row kn-between">
                   <h2 className="kn-sub-title">
                     {item.value.title || "Untitled"} <Tag>{item.kind}</Tag>
@@ -125,7 +123,7 @@ export function Research() {
                   </Button>
                 </div>
                 <p className="tb-hint">Updated {when(item.value.updated)}</p>
-                <TextBlock text={itemText(item.value)} label={`Text of ${item.kind}`} />
+                <p className="tb-soft kn-wrap">{itemText(item.value)}</p>
               </Card>
             ) : (
               <p className="tb-soft">Choose a source or a note to read it.</p>
