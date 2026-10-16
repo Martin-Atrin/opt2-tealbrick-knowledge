@@ -1,0 +1,75 @@
+# Knowledge (Tealbrick mini app): architecture
+
+State: verified against the repo on 2026-10-16. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see the system `ARCHITECTURE.md` and `SYSTEM-OVERVIEW.md`.
+
+## Common app pattern (verified for all seven apps)
+
+- **Runtime**: Node 24, TypeScript run through `tsc` to `dist/`, UI built by `scripts/build-ui.ts` (no bundler; content-hashed `assets-<hash>/`). The app is started by `startApp` from `@opt2-tealbrick/miniapp-sdk` (`src/main.ts`).
+- **Dockerfile**: two stages on `node:24-slim` pinned by digest, `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm run build && pnpm prune --prod`, the manifest also copied to `/opt/tb/tealbrick.manifest.json` (the `tb-exec` default), `USER node`, no `VOLUME`. The SDK drops root to uid 1000 itself when the platform starts the container as root (Railway volumes are root-owned).
+- **Data**: one SQLite file `TB_DATA_DIR/app.db` owned by the SDK. App tables use their own prefix; SDK tables use `tb_*`. On Railway there is ONE volume per service: the backup directory is `<data mount>/backup`, so the volume size is data plus backup (C28).
+- **Migrations**: `migrations/NNNN_name.sql` (or `.ts` exporting `up(db)`). The SDK enforces forward-only: gap-free from 0001, one transaction each, sha256 recorded in `tb_migrations`. A changed, missing, misnamed or `down` migration stops the app with `migration_invalid`.
+- **Backups and restore**: SDK cron runner writes `tb-backup-<UTC>.tar.gz`; export `tealbrick.export/1` never carries the instance key, KEK, keys, secrets or sessions. Restore at next boot with `TB_RESTORE_FROM`.
+- **Authorization**: the bridge gates (`gate()`); the SDK decides (`authorize()`): run, hold or refuse. Holds and receipts live in the app's own `tb_receipts` table. Raw call input is never stored, only a digest.
+- **Manifest** `tealbrick.manifest.json` is the only source for operations, scopes, settings, hooks, companions, skills, runtime hints, backups and UI paths. Schema `tealbrick.miniapp/2`, `sdkMajor 1`, `source.license Apache-2.0`. Agent ops become MCP tools `<product>__<op>`. Person ops are owner UI only.
+- **Generated**: `gen/` (openapi, kit, docs, railway) is produced by `tb-gen` and is not committed. The typed client kit is built into `dist/kit` and imported as `#kit` in apps that have one.
+- **Standard UI pages** (from the kit `AppShell`): Holds, Receipts, Agents and scopes, Keys (where the app has keys), Backups and export.
+- **Licence files**: `LICENSE` (Apache-2.0), `NOTICE`, `THIRD_PARTY_NOTICES.md`. The brand mark and app art are Tealbrick artwork and are not Apache-licensed.
+- **Private by design**: no public address. Only the bridge is public.
+
+## Knowledge: what it does
+
+Knowledge is a normalization wrapper over engines. Canonical documents stay in Knowledge (engine independent) and are projected into GBrain pages; the engine can be rebuilt from Knowledge (`afterRestore` requeues everything). Engine tools are exposed 1:1 under a dynamic `engine` list, bounded by a pinned surface, and anything else fails closed. Without an engine, recall degrades to keyword search (`degraded: true`).
+
+## Operations (from `tealbrick.manifest.json`)
+
+48 operations.
+- Read (agent, per area): `recall`, `areas_list`, `collections_list`, `documents_search`, `document_get`, `document_revisions`, `comments_list`, `links_list`, research reads, `engine` (dynamic list of upstream `gb_*` tools, ceiling destructive).
+- Write (agent): `remember`, `collection_create`, `document_create`, `document_update`, `comment_add`, `link_add`, `research_source_add`, `research_chat_start`, `research_ask`.
+- Destructive, hold `destructive`: `document_delete`, `collection_delete`, `link_delete`, `research_source_delete`.
+- Person: 10 library reads, 4 writes, 4 destructive (held).
+- Rules' `rules.narrowing` memory tags are consumed (`src/narrowing.ts`). Writes to existing items obey read visibility (F90, C150). URL research sources are deferred until a network policy exists (C61). There is no attachment storage.
+
+## Scopes, hooks and companions
+
+- **Scopes:** `area` (access `read`, `read_write`). Default grants: own area read_write, shared area read. The shared company area is read for every connected agent; write is off until the owner turns it on per agent (C1). Events `agentAdded` (creates the company area and that agent's area) and `keysChanged`.
+- **Hooks:** None.
+- **Companion grants it asks for:** None asked. It calls GBrain at `/mcp` (stateless JSON-RPC POST, no redirects, 2 MB response cap) and Open Notebook REST (4 MB cap).
+
+## Settings, keys and environment
+
+Settings (all `mutable:false`, set at deploy): `engine` (gbrain; hindsight is disabled), `research` (default false), `model_provider` (openai default, google, anthropic). Keys, from the bridge key store (account default): `OPENAI_API_KEY` (required for openai and for anthropic embeddings), `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`. Env passed to the app: `KNOWLEDGE_ENGINE`, `KNOWLEDGE_RESEARCH`, `KNOWLEDGE_MODEL_PROVIDER`, `KNOWLEDGE_GBRAIN_URL`, `KNOWLEDGE_GBRAIN_ADMIN_TOKEN`, `KNOWLEDGE_NOTEBOOK_URL`, `KNOWLEDGE_NOTEBOOK_PASSWORD` (wired by the deploy recipe). Service knobs: `KNOWLEDGE_MIGRATION_{WAIT_S,LOCK_STALE_S,POLL_S,RETRY_MIN_S,RETRY_MAX_S}`. Default model names live in `src/config.ts` and must become customer-editable (C186, open). The Dockerfile does not set `TB_DATA_DIR` or `TB_BACKUP_DIR` (UNVERIFIED how the recipe sets them).
+
+Companion services (built from `services/<id>/Dockerfile`, started with the SDK `tb-exec` wrapper, which fetches declared keys and runs backup dump and restore): `gbrain-db` (pgvector on Postgres 17), `gbrain` (upstream commit pinned, a Tealbrick boot wrapper with a crash-safe migration lock and a helper), and, when research is on, `notebook-db` (SurrealDB under the Business Source License 1.1, C155) and `notebook` (Open Notebook). Upstream stays unmodified.
+
+## Data
+
+- **Stored:** Migration 0001: `kn_areas`, `kn_collections`, `kn_documents` (title, slug, summary, body, status), `kn_revisions`, `kn_comments`, `kn_links`, `kn_documents_fts` (FTS5), `kn_projection` (outbox to the engine), `kn_state`. Sealed: registered engine client credentials. Engine data lives on the service volumes.
+- **Never stored:** Attachments (no table, no op), model keys outside the bridge key store.
+
+## External calls and background work
+
+- **External:** Only the engines, on the private network. Model providers (OpenAI, Google, Anthropic) are called by GBrain and Open Notebook, not by the app code.
+- **Background:** Projection outbox drain every 30 s (batch 20, max 12 attempts, backoff 5 s up to 1 hour). Engine probe at start and every 10 minutes (feeds SDK `attention()`). Retry of failed rows at boot. Migrations on the engine services are crash-safe (C69).
+
+## Person UI
+
+Memory (Library, Recall, Memory status), Research, Holds, Receipts, Agents and scopes, Keys, Backups and export (`src/ui/main.tsx`).
+
+## Requirements and runtime hints
+
+A model-provider key (OpenAI by default; Anthropic mode still needs an OpenAI key for embeddings). Engine and database services must be healthy for engine-backed ops. SurrealDB is BSL 1.1: self-hosting inside Knowledge on the customer's Railway is expected to be fine, but legal confirmation is open (C155).
+
+App port 5310, 0.5 cpu, 768 MB, data 5 GB plus backup 20 GB. Engine only: about 2.0 cpu, 3.3 GB RAM, 37 GB volume. With research: about 3.5 cpu, 5.4 GB RAM, 47 GB (computed from the manifest; UNVERIFIED against a deployed template). Backup cron `23 2 * * *`, retain 14; each service with a dump is dumped by `tb-exec`.
+
+## Pinned packages
+
+Stable 0.1.20: miniapp-sdk 0.1.22, spec 0.1.31. Main (0.1.21-dev.1): miniapp-sdk 0.1.25, spec 0.1.39. Both: manifest 0.1.18, conformance 0.1.18, ui 0.2.4. The `tb-exec` service package pins miniapp-sdk 0.1.12.
+
+All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, RS-3 candidates). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Until then Core can roll back an update of such an app only as an image (no data restore).
+
+## Known gaps
+
+- README says "scaffold", lists npm scripts (the repo uses pnpm), claims attachments, and omits `handlers.ts`, `library.ts`, `projection.ts`, `services/`. `services/README.md` is accurate.
+- Stable 0.1.20 pins SDK 0.1.22; the dev build already pins 0.1.25.
+- Model name defaults are not yet editable by the customer (C186).
+- Upstream images are root-capable; the user was not checked (UNVERIFIED).
