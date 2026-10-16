@@ -65,7 +65,7 @@ App port 5310, 0.5 cpu, 768 MB, data 5 GB plus backup 20 GB. Engine only: about 
 
 Stable 0.1.20: miniapp-sdk 0.1.22, spec 0.1.31. Main (0.1.21-dev.1): miniapp-sdk 0.1.25, spec 0.1.39. Both: manifest 0.1.18, conformance 0.1.18, ui 0.2.4. The `tb-exec` service package pins miniapp-sdk 0.1.12.
 
-All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, RS-3 candidates). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Core main (portal-core#1, E3) restores the snapshot on an automatic rollback, but that Core is not live yet (it goes live with RS-3, per the portal-core README). Until then Core can roll back an update only as an image (no data restore).
+All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, soaking on qa1 for the stable promotion). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Core main (portal-core#1, E3) restores the snapshot on an automatic rollback, but that Core is not live yet (it goes live with RS-3, per the portal-core README). Until then Core can roll back an update only as an image (no data restore).
 
 ## Known gaps
 
