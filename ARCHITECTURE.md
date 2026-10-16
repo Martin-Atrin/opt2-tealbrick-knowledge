@@ -1,8 +1,8 @@
 # Knowledge (Tealbrick mini app): architecture
 
-State: verified against the repo on 2026-10-16. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see the system `ARCHITECTURE.md` and `SYSTEM-OVERVIEW.md`.
+State: verified against the repo on 2026-10-17. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see the system `ARCHITECTURE.md` and `SYSTEM-OVERVIEW.md`.
 
-## Common app pattern (verified for all seven apps)
+## Common app pattern (verified for this repo on 2026-10-17)
 
 - **Runtime**: Node 24, TypeScript run through `tsc` to `dist/`, UI built by `scripts/build-ui.ts` (no bundler; content-hashed `assets-<hash>/`). The app is started by `startApp` from `@opt2-tealbrick/miniapp-sdk` (`src/main.ts`).
 - **Dockerfile**: two stages on `node:24-slim` pinned by digest, `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm run build && pnpm prune --prod`, the manifest also copied to `/opt/tb/tealbrick.manifest.json` (the `tb-exec` default), `USER node`, no `VOLUME`. The SDK drops root to uid 1000 itself when the platform starts the container as root (Railway volumes are root-owned).
@@ -23,7 +23,7 @@ Knowledge is a normalization wrapper over engines. Canonical documents stay in K
 ## Operations (from `tealbrick.manifest.json`)
 
 48 operations.
-- Read (agent, per area): `recall`, `areas_list`, `collections_list`, `documents_search`, `document_get`, `document_revisions`, `comments_list`, `links_list`, research reads, `engine` (dynamic list of upstream `gb_*` tools, ceiling destructive).
+- Read (agent, per area): `recall`, `areas_list`, `collections_list`, `collection_get`, `collection_tree`, `documents_search`, `document_get`, `document_revisions`, `comments_list`, `links_list`, research reads, `engine` (dynamic list of upstream `gb_*` tools, ceiling destructive).
 - Write (agent): `remember`, `collection_create`, `document_create`, `document_update`, `comment_add`, `link_add`, `research_source_add`, `research_chat_start`, `research_ask`.
 - Destructive, hold `destructive`: `document_delete`, `collection_delete`, `link_delete`, `research_source_delete`.
 - Person: 10 library reads, 4 writes, 4 destructive (held).
@@ -37,7 +37,7 @@ Knowledge is a normalization wrapper over engines. Canonical documents stay in K
 
 ## Settings, keys and environment
 
-Settings (all `mutable:false`, set at deploy): `engine` (gbrain; hindsight is disabled), `research` (default false), `model_provider` (openai default, google, anthropic). Keys, from the bridge key store (account default): `OPENAI_API_KEY` (required for openai and for anthropic embeddings), `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`. Env passed to the app: `KNOWLEDGE_ENGINE`, `KNOWLEDGE_RESEARCH`, `KNOWLEDGE_MODEL_PROVIDER`, `KNOWLEDGE_GBRAIN_URL`, `KNOWLEDGE_GBRAIN_ADMIN_TOKEN`, `KNOWLEDGE_NOTEBOOK_URL`, `KNOWLEDGE_NOTEBOOK_PASSWORD` (wired by the deploy recipe). Service knobs: `KNOWLEDGE_MIGRATION_{WAIT_S,LOCK_STALE_S,POLL_S,RETRY_MIN_S,RETRY_MAX_S}`. Default model names live in `src/config.ts` and must become customer-editable (C186, open). The Dockerfile does not set `TB_DATA_DIR` or `TB_BACKUP_DIR` (UNVERIFIED how the recipe sets them).
+Settings (all `mutable:false`, set at deploy): `engine` (gbrain; hindsight is disabled), `research` (default false), `model_provider` (openai default, google, anthropic). Keys, from the bridge key store (account default): `OPENAI_API_KEY` (required for openai and for anthropic embeddings), `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`. Env passed to the app: `KNOWLEDGE_ENGINE`, `KNOWLEDGE_RESEARCH`, `KNOWLEDGE_MODEL_PROVIDER`, `KNOWLEDGE_GBRAIN_URL`, `KNOWLEDGE_GBRAIN_ADMIN_TOKEN`, `KNOWLEDGE_NOTEBOOK_URL`, `KNOWLEDGE_NOTEBOOK_PASSWORD` (wired by the deploy recipe). Service knobs: `KNOWLEDGE_MIGRATION_{WAIT_S,LOCK_STALE_S,POLL_S,RETRY_MIN_S,RETRY_MAX_S}`. Default model names live in `src/config.ts` and must become customer-editable (C186, open). The Dockerfile does not set `TB_DATA_DIR` or `TB_BACKUP_DIR`; the deploy recipe sets them (SDK-API section 13; `tb-gen railway` sets both).
 
 Companion services (built from `services/<id>/Dockerfile`, started with the SDK `tb-exec` wrapper, which fetches declared keys and runs backup dump and restore): `gbrain-db` (pgvector on Postgres 17), `gbrain` (upstream commit pinned, a Tealbrick boot wrapper with a crash-safe migration lock and a helper), and, when research is on, `notebook-db` (SurrealDB under the Business Source License 1.1, C155) and `notebook` (Open Notebook). Upstream stays unmodified.
 
@@ -65,11 +65,10 @@ App port 5310, 0.5 cpu, 768 MB, data 5 GB plus backup 20 GB. Engine only: about 
 
 Stable 0.1.20: miniapp-sdk 0.1.22, spec 0.1.31. Main (0.1.21-dev.1): miniapp-sdk 0.1.25, spec 0.1.39. Both: manifest 0.1.18, conformance 0.1.18, ui 0.2.4. The `tb-exec` service package pins miniapp-sdk 0.1.12.
 
-All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, RS-3 candidates). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Until then Core can roll back an update of such an app only as an image (no data restore).
+All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, RS-3 candidates). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Core main (portal-core#1, E3) restores the snapshot on an automatic rollback, but that Core is not live yet (it goes live with RS-3, per the portal-core README). Until then Core can roll back an update only as an image (no data restore).
 
 ## Known gaps
 
-- README says "scaffold", lists npm scripts (the repo uses pnpm), claims attachments, and omits `handlers.ts`, `library.ts`, `projection.ts`, `services/`. `services/README.md` is accurate.
 - Stable 0.1.20 pins SDK 0.1.22; the dev build already pins 0.1.25.
 - Model name defaults are not yet editable by the customer (C186).
-- Upstream images are root-capable; the user was not checked (UNVERIFIED).
+- No service Dockerfile sets `USER` and no manifest service sets `dropPrivileges`, so the four service images run as their upstream image's default user (root-capable).

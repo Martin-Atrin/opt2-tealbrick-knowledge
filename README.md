@@ -2,7 +2,7 @@
 
 Agent memory and documents inside the customer's own deployment: a canonical document store projected into unmodified upstream engines (GBrain for memory, Open Notebook for research). Built on the Miniapp SDK.
 
-**Status:** 0.1.20. Visibility: public, Apache-2.0. Published as five GHCR images: the app (`ghcr.io/tealbrick/opt2-tealbrick-knowledge`) and four companion services.
+**Status:** stable 0.1.20; `main` is 0.1.21-dev.1 (dev channel only). Visibility: public, Apache-2.0. Published as five public GHCR images: the app (`ghcr.io/tealbrick/opt2-tealbrick-knowledge`) and four companion services (on 2026-10-17 each image has the tags `0.1.21-dev.1` and a `sha-` tag only; there is no `0.1.20` tag in that registry).
 
 - Repository: `Tealbrick/opt2-tealbrick-knowledge` (GitHub organisation `Tealbrick`)
 - Licence: Apache-2.0 for the app code (`LICENSE`, `NOTICE`); upstream licences are in `THIRD_PARTY_NOTICES.md`. The Tealbrick brand mark and app art are Tealbrick artwork and are not covered by the Apache-2.0 licence.
@@ -14,7 +14,7 @@ This repository is public. It must never contain secrets or personal data, and n
 - No API keys, tokens, passwords, private keys, deployment secrets, `.env` files or connection strings. Use `.env.example` with placeholder values only.
 - Runtime secrets live in the deployment platform (Railway variables) and are copied between services without printing them.
 - No personal names, private agent configurations or customer data.
-- Every push runs a secret scan (gitleaks, the `secret-scan` step in `.woodpecker/ci.yaml`). GitHub secret scanning with push protection is enabled. Optional local guard: `pre-commit install`.
+- Every pull request and every push to `main` runs a secret scan (gitleaks, the `secret-scan` step in `.woodpecker/ci.yaml`). GitHub secret scanning and push protection are not enabled on this repository, so this CI step is the guard. Optional local guard: `pre-commit install` (`.pre-commit-config.yaml` runs gitleaks).
 - If a secret is committed anyway: rotate it first, then remove it from history.
 
 ## What it does
@@ -86,7 +86,7 @@ Upstream stays unmodified.
 1. Set the same version in `package.json` and `tealbrick.manifest.json`. Check `publisher` and `source.repo` in the manifest; the repository name must match the image name in `tealbrick-ci.json` (`opt2-tealbrick-knowledge`).
 2. Tag `v<semver>` on a green pipeline and push the tag. Tags are immutable.
 3. The release Action pushes the GHCR images (the app and `opt2-tealbrick-knowledge-<service>` for each service) and the kit tarball. `registry-sync` signs the index entry with the image digest and the manifest digest.
-4. Core deploys the newest stable version when the owner installs or updates the app. An update that fails keeps the previous version serving.
+4. Core deploys the newest stable version when the owner installs or updates the app. Core main (portal-core#1, E3) switches to the new version only after a health check and rolls back when it fails; the live Core does not have this yet (it goes live with RS-3, per the portal-core README).
 
 ## Dependency pins
 
